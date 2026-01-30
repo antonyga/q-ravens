@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venvScriptspip install -e \".[dev]\")",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" install -e \".[dev]\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"from q_ravens.core import QRavensRunner, QRavensState; print\\(''Imports OK''\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\playwright.exe\" install chromium)",
+      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" --help)",
+      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" config)",
+      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" test https://example.com --verbose)",
+      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" test https://example.com)"
+    ]
+  }
+}
