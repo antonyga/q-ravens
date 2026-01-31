@@ -5,10 +5,10 @@ Provides state persistence using SQLite for checkpointing.
 Enables pause/resume of workflows across restarts.
 """
 
-import os
 from pathlib import Path
 from typing import Optional
 
+import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -41,7 +41,12 @@ async def create_sqlite_checkpointer(session_id: Optional[str] = None) -> AsyncS
         AsyncSqliteSaver instance
     """
     db_path = get_checkpoint_path(session_id)
-    return AsyncSqliteSaver.from_conn_string(db_path)
+    # Create async connection
+    conn = await aiosqlite.connect(db_path)
+    saver = AsyncSqliteSaver(conn)
+    # Setup the database schema
+    await saver.setup()
+    return saver
 
 
 def create_memory_checkpointer() -> MemorySaver:

@@ -35,6 +35,9 @@ dependencies = [
     # Browser Automation
     "playwright>=1.40.0",
 
+    # Image Processing (for SoM overlay)
+    "Pillow>=10.0.0",
+
     # Vector Memory
     "chromadb>=0.4.0",
 

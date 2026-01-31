@@ -31,6 +31,13 @@ from q_ravens.core.error_handler import (
     with_error_handling,
     create_safe_node,
 )
+from q_ravens.core.visual_reasoning import (
+    VisualReasoningEngine,
+    ReasoningResult,
+    ReasoningConfidence,
+    GoalDecomposition,
+    analyze_page_and_decide,
+)
 
 __all__ = [
     # Config
@@ -62,4 +69,10 @@ __all__ = [
     "handle_agent_error",
     "with_error_handling",
     "create_safe_node",
+    # Visual Reasoning
+    "VisualReasoningEngine",
+    "ReasoningResult",
+    "ReasoningConfidence",
+    "GoalDecomposition",
+    "analyze_page_and_decide",
 ]

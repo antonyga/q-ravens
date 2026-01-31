@@ -180,6 +180,15 @@ async def human_node(state: QRavensState) -> dict[str, Any]:
         # Process the user's response
         approved = user_input.lower() in ["y", "yes", "approve", "ok", "continue"]
 
+        # Get the phase to resume to - use the phase before we started waiting
+        # If we have analysis, resume to ANALYZING so orchestrator can proceed to execution
+        # Otherwise, resume to INIT
+        has_analysis = state.get("analysis") is not None
+        if approved:
+            resume_phase = WorkflowPhase.ANALYZING.value if has_analysis else WorkflowPhase.INIT.value
+        else:
+            resume_phase = WorkflowPhase.COMPLETED.value
+
         # Clear the approval state
         return {
             "requires_user_input": False,
@@ -190,7 +199,7 @@ async def human_node(state: QRavensState) -> dict[str, Any]:
                 approved=approved,
                 feedback=user_input if not approved else None,
             ).to_dict(),
-            "phase": WorkflowPhase.INIT.value if approved else WorkflowPhase.COMPLETED.value,
+            "phase": resume_phase,
             "messages": [
                 HumanMessage(content=f"User response: {user_input}")
             ],
