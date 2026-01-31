@@ -44,14 +44,15 @@ Available specialist agents:
 - Analyzer: Crawls websites, maps structure, identifies elements and tech stack
 - Designer: Creates comprehensive test strategies and test cases
 - Executor: Runs automated tests using Playwright
-- Reporter: Generates test reports (coming soon)
+- Reporter: Generates comprehensive test reports for different audiences
 
 When given a URL to test, your typical workflow is:
 1. First, delegate to Analyzer to understand the website
 2. Delegate to Designer to create test cases based on analysis
 3. Request user approval for the test plan
 4. Delegate to Executor to run the tests
-5. Compile results and report to user
+5. Delegate to Reporter to generate the final report
+6. Present the final report to the user
 
 Always respond with clear, actionable decisions. Be concise and professional.
 When you need to delegate, clearly state which agent and what task."""
@@ -190,20 +191,51 @@ Do you approve executing these tests? (yes/no)"""
                 "approval_response": None,  # Clear the response
             }
 
-        # After execution is complete
+        # After execution is complete - delegate to reporter
         if phase == WorkflowPhase.EXECUTING.value and test_results:
             passed = sum(1 for r in test_results if r.status.value == "passed")
             failed = sum(1 for r in test_results if r.status.value == "failed")
             total = len(test_results)
 
             message = AIMessage(
-                content=f"Testing complete!\n\n"
+                content=f"Test execution complete!\n\n"
                 f"Results: {passed}/{total} tests passed, {failed} failed.\n\n"
-                f"Test Summary:\n"
-                + "\n".join(
-                    f"- {r.test_id}: {r.status.value.upper()}"
-                    for r in test_results
+                f"Delegating to Reporter agent to generate comprehensive report..."
+            )
+            return {
+                "phase": WorkflowPhase.REPORTING.value,
+                "next_agent": "reporter",
+                "messages": [message],
+                "iteration_count": iteration,
+                "current_agent": self.name,
+            }
+
+        # After reporting is complete
+        report = state.get("report")
+        if phase == WorkflowPhase.REPORTING.value and report:
+            # Extract key info from report
+            summary = report.summary
+            pass_rate = summary.pass_rate if summary else 0.0
+            critical_issues = len(report.critical_issues) if report else 0
+
+            status = "HEALTHY" if pass_rate >= 90 else (
+                "NEEDS ATTENTION" if pass_rate >= 70 else (
+                    "CONCERNING" if pass_rate >= 50 else "CRITICAL"
                 )
+            )
+
+            message = AIMessage(
+                content=f"Q-Ravens Testing Complete!\n\n"
+                f"Status: {status}\n"
+                f"Pass Rate: {pass_rate:.1f}%\n"
+                f"Critical Issues: {critical_issues}\n\n"
+                f"Executive Summary:\n{report.executive_summary[:500]}..."
+                if len(report.executive_summary) > 500 else
+                f"Q-Ravens Testing Complete!\n\n"
+                f"Status: {status}\n"
+                f"Pass Rate: {pass_rate:.1f}%\n"
+                f"Critical Issues: {critical_issues}\n\n"
+                f"Executive Summary:\n{report.executive_summary}"
             )
             return {
                 "phase": WorkflowPhase.COMPLETED.value,

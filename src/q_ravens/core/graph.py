@@ -55,7 +55,7 @@ def route_next_agent(state: QRavensState) -> AgentName | str:
         WorkflowPhase.ANALYZING.value: "analyzer",
         WorkflowPhase.DESIGNING.value: "designer",
         WorkflowPhase.EXECUTING.value: "executor",
-        WorkflowPhase.REPORTING.value: "orchestrator",  # Reporter not implemented yet
+        WorkflowPhase.REPORTING.value: "reporter",
     }
 
     return phase_routing.get(phase, END)
@@ -66,6 +66,7 @@ def create_graph(
     analyzer_node,
     executor_node,
     designer_node=None,
+    reporter_node=None,
     human_node=None,
 ) -> StateGraph:
     """
@@ -76,6 +77,7 @@ def create_graph(
         analyzer_node: The analyzer agent function
         executor_node: The executor agent function
         designer_node: Optional designer agent function (Test Architect)
+        reporter_node: Optional reporter agent function (QA Lead)
         human_node: Optional human-in-the-loop node
 
     Returns:
@@ -92,6 +94,10 @@ def create_graph(
     # Add designer node if provided
     if designer_node:
         workflow.add_node("designer", designer_node)
+
+    # Add reporter node if provided
+    if reporter_node:
+        workflow.add_node("reporter", reporter_node)
 
     # Add human node if provided (for human-in-the-loop)
     if human_node:
@@ -111,6 +117,10 @@ def create_graph(
     # Add designer route if available
     if designer_node:
         base_routes["designer"] = "designer"
+
+    # Add reporter route if available
+    if reporter_node:
+        base_routes["reporter"] = "reporter"
 
     # Add human route if available
     if human_node:
@@ -145,6 +155,14 @@ def create_graph(
         base_routes,
     )
 
+    # Add conditional edges from reporter (if present)
+    if reporter_node:
+        workflow.add_conditional_edges(
+            "reporter",
+            route_next_agent,
+            base_routes,
+        )
+
     # Add edges from human node back to orchestrator
     if human_node:
         workflow.add_edge("human", "orchestrator")
@@ -157,6 +175,7 @@ def compile_graph(
     analyzer_node,
     executor_node,
     designer_node=None,
+    reporter_node=None,
     human_node=None,
     checkpointer=None,
 ):
@@ -168,6 +187,7 @@ def compile_graph(
         analyzer_node: The analyzer agent function
         executor_node: The executor agent function
         designer_node: Optional designer agent function (Test Architect)
+        reporter_node: Optional reporter agent function (QA Lead)
         human_node: Optional human-in-the-loop node
         checkpointer: Optional checkpointer for state persistence
 
@@ -179,6 +199,7 @@ def compile_graph(
         analyzer_node=analyzer_node,
         executor_node=executor_node,
         designer_node=designer_node,
+        reporter_node=reporter_node,
         human_node=human_node,
     )
 

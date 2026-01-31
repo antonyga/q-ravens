@@ -25,7 +25,13 @@ from q_ravens.core.exceptions import (
     MaxIterationsError,
     URLValidationError,
 )
-from q_ravens.agents import orchestrator_node, analyzer_node, designer_node, executor_node
+from q_ravens.agents import (
+    orchestrator_node,
+    analyzer_node,
+    designer_node,
+    executor_node,
+    reporter_node,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,18 +108,21 @@ class QRavensRunner:
             anlz_node = analyzer_node
             dsgn_node = designer_node
             exec_node = executor_node
+            rpt_node = reporter_node
 
             if self.use_safe_nodes:
                 orch_node = create_safe_node(orchestrator_node, "orchestrator", self.max_errors)
                 anlz_node = create_safe_node(analyzer_node, "analyzer", self.max_errors)
                 dsgn_node = create_safe_node(designer_node, "designer", self.max_errors)
                 exec_node = create_safe_node(executor_node, "executor", self.max_errors)
+                rpt_node = create_safe_node(reporter_node, "reporter", self.max_errors)
 
             self._graph = compile_graph(
                 orchestrator_node=orch_node,
                 analyzer_node=anlz_node,
                 executor_node=exec_node,
                 designer_node=dsgn_node,
+                reporter_node=rpt_node,
                 human_node=human_node,
                 checkpointer=self._checkpointer,
             )

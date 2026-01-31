@@ -4,8 +4,8 @@ Q-Ravens Tools Module
 Contains integrations with testing tools:
 - Playwright: Browser automation
 - Vision: Screenshot capture and SoM overlay
-- Lighthouse: Performance testing
-- Axe-core: Accessibility testing
+- Lighthouse: Performance testing (Core Web Vitals)
+- Axe-core: Accessibility testing (WCAG 2.1)
 - OWASP ZAP: Security scanning (future)
 """
 
@@ -30,6 +30,22 @@ from q_ravens.tools.actions import (
     ScrollDirection,
     create_action_from_dict,
 )
+from q_ravens.tools.lighthouse import (
+    LighthouseTool,
+    LighthouseResult,
+    CoreWebVitals,
+    PerformanceAudit,
+    PerformanceCategory,
+    run_lighthouse_audit,
+)
+from q_ravens.tools.accessibility import (
+    AccessibilityTool,
+    AccessibilityResult,
+    AccessibilityViolation,
+    WCAGLevel,
+    ImpactLevel,
+    run_accessibility_audit,
+)
 
 __all__ = [
     # Browser
@@ -52,4 +68,18 @@ __all__ = [
     "MouseButton",
     "ScrollDirection",
     "create_action_from_dict",
+    # Lighthouse (Performance)
+    "LighthouseTool",
+    "LighthouseResult",
+    "CoreWebVitals",
+    "PerformanceAudit",
+    "PerformanceCategory",
+    "run_lighthouse_audit",
+    # Accessibility (axe-core)
+    "AccessibilityTool",
+    "AccessibilityResult",
+    "AccessibilityViolation",
+    "WCAGLevel",
+    "ImpactLevel",
+    "run_accessibility_audit",
 ]

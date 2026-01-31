@@ -384,19 +384,42 @@ Respond with ONLY a JSON array of test cases, no additional text."""
         ))
         test_id += 1
 
-        # Basic accessibility test
+        # Performance test - Core Web Vitals with Lighthouse
         test_cases.append(TestCase(
             id=f"TC-{test_id:03d}",
-            name="Basic Accessibility Check",
-            description="Verify basic accessibility attributes are present",
+            name="Performance - Core Web Vitals",
+            description="Measure Core Web Vitals using Lighthouse audit",
             steps=[
                 f"Navigate to {analysis.target_url}",
-                "Check for alt attributes on images",
-                "Verify form labels are present",
-                "Check heading hierarchy",
+                "Run Lighthouse performance audit",
+                "Measure LCP (Largest Contentful Paint)",
+                "Measure TBT (Total Blocking Time)",
+                "Measure CLS (Cumulative Layout Shift)",
+                "Measure FCP (First Contentful Paint)",
             ],
-            expected_result="Basic accessibility requirements are met",
+            expected_result="Core Web Vitals meet 'Good' thresholds: LCP < 2.5s, TBT < 200ms, CLS < 0.1",
             priority="medium",
+            category="performance",
+            status=TestStatus.PENDING,
+        ))
+        test_id += 1
+
+        # Accessibility test - WCAG 2.1 AA with axe-core
+        test_cases.append(TestCase(
+            id=f"TC-{test_id:03d}",
+            name="Accessibility - WCAG 2.1 AA Compliance",
+            description="Check WCAG 2.1 Level AA compliance using axe-core",
+            steps=[
+                f"Navigate to {analysis.target_url}",
+                "Inject and run axe-core accessibility audit",
+                "Check for critical accessibility violations",
+                "Check for serious accessibility violations",
+                "Verify color contrast ratios",
+                "Check for missing alt text on images",
+                "Verify form labels and ARIA attributes",
+            ],
+            expected_result="No critical or serious accessibility violations. Compliance >= 90%",
+            priority="high",
             category="accessibility",
             status=TestStatus.PENDING,
         ))
