@@ -17,6 +17,20 @@ from q_ravens.core.state import (
 )
 from q_ravens.core.graph import create_graph, compile_graph
 from q_ravens.core.runner import QRavensRunner, run_test
+from q_ravens.core.exceptions import (
+    QRavensError,
+    LLMError,
+    AgentError,
+    WorkflowError,
+    ToolError,
+    ValidationError,
+)
+from q_ravens.core.error_handler import (
+    ErrorRecord,
+    handle_agent_error,
+    with_error_handling,
+    create_safe_node,
+)
 
 __all__ = [
     # Config
@@ -36,4 +50,16 @@ __all__ = [
     # Runner
     "QRavensRunner",
     "run_test",
+    # Exceptions
+    "QRavensError",
+    "LLMError",
+    "AgentError",
+    "WorkflowError",
+    "ToolError",
+    "ValidationError",
+    # Error handling
+    "ErrorRecord",
+    "handle_agent_error",
+    "with_error_handling",
+    "create_safe_node",
 ]

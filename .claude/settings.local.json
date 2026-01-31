@@ -8,7 +8,9 @@
       "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" --help)",
       "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" config)",
       "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" test https://example.com --verbose)",
-      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" test https://example.com)"
+      "Bash(\".venv\\\\Scripts\\\\q-ravens.exe\" test https://example.com)",
+      "Bash(.venvScriptspython -c \"from q_ravens.core.exceptions import *; from q_ravens.core.error_handler import *; from q_ravens.agents.base import BaseAgent, RetryConfig; print\\(''All imports successful!''\\)\")",
+      "Bash(.venv/Scripts/python:*)"
     ]
   }
 }

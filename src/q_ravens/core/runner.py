@@ -6,6 +6,7 @@ Supports checkpointing for state persistence and resume capability.
 """
 
 import asyncio
+import logging
 from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -15,7 +16,38 @@ from q_ravens.core.state import QRavensState, WorkflowPhase
 from q_ravens.core.graph import compile_graph
 from q_ravens.core.checkpoint import CheckpointManager, create_sqlite_checkpointer
 from q_ravens.core.human_loop import human_node
+from q_ravens.core.error_handler import create_safe_node
+from q_ravens.core.exceptions import (
+    QRavensError,
+    WorkflowError,
+    WorkflowStateError,
+    WorkflowCheckpointError,
+    MaxIterationsError,
+    URLValidationError,
+)
 from q_ravens.agents import orchestrator_node, analyzer_node, executor_node
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_url(url: str) -> None:
+    """
+    Validate that a URL is properly formatted.
+
+    Args:
+        url: URL to validate
+
+    Raises:
+        URLValidationError: If URL is invalid
+    """
+    if not url:
+        raise URLValidationError("URL cannot be empty")
+
+    if not url.startswith(("http://", "https://")):
+        raise URLValidationError(
+            f"URL must start with http:// or https://",
+            details={"url": url},
+        )
 
 
 class QRavensRunner:
@@ -26,32 +58,59 @@ class QRavensRunner:
     optional state persistence via checkpointing.
     """
 
-    def __init__(self, persist: bool = True, session_id: Optional[str] = None):
+    def __init__(
+        self,
+        persist: bool = True,
+        session_id: Optional[str] = None,
+        use_safe_nodes: bool = True,
+        max_errors: int = 5,
+    ):
         """
         Initialize the runner.
 
         Args:
             persist: Whether to persist state to disk (SQLite)
             session_id: Optional session ID for checkpointing
+            use_safe_nodes: Whether to wrap agent nodes with error handling
+            max_errors: Maximum errors before failing workflow
         """
         self.persist = persist
         self.session_id = session_id or str(uuid4())
         self.checkpoint_manager = CheckpointManager(persist=persist)
+        self.use_safe_nodes = use_safe_nodes
+        self.max_errors = max_errors
         self._graph = None
         self._checkpointer = None
 
     async def _ensure_graph(self):
         """Ensure the graph is compiled with the appropriate checkpointer."""
         if self._graph is None:
-            if self.persist:
-                self._checkpointer = await create_sqlite_checkpointer(self.session_id)
-            else:
-                self._checkpointer = MemorySaver()
+            try:
+                if self.persist:
+                    self._checkpointer = await create_sqlite_checkpointer(self.session_id)
+                else:
+                    self._checkpointer = MemorySaver()
+            except Exception as e:
+                logger.error(f"Failed to create checkpointer: {e}")
+                raise WorkflowCheckpointError(
+                    f"Failed to initialize checkpointing: {e}",
+                    details={"session_id": self.session_id, "persist": self.persist},
+                ) from e
+
+            # Optionally wrap nodes with error handling
+            orch_node = orchestrator_node
+            anlz_node = analyzer_node
+            exec_node = executor_node
+
+            if self.use_safe_nodes:
+                orch_node = create_safe_node(orchestrator_node, "orchestrator", self.max_errors)
+                anlz_node = create_safe_node(analyzer_node, "analyzer", self.max_errors)
+                exec_node = create_safe_node(executor_node, "executor", self.max_errors)
 
             self._graph = compile_graph(
-                orchestrator_node=orchestrator_node,
-                analyzer_node=analyzer_node,
-                executor_node=executor_node,
+                orchestrator_node=orch_node,
+                analyzer_node=anlz_node,
+                executor_node=exec_node,
                 human_node=human_node,
                 checkpointer=self._checkpointer,
             )
@@ -78,8 +137,23 @@ class QRavensRunner:
 
         Returns:
             Final state after workflow completion
+
+        Raises:
+            URLValidationError: If URL is invalid
+            WorkflowError: If workflow fails to execute
+            MaxIterationsError: If maximum iterations exceeded
         """
-        graph = await self._ensure_graph()
+        # Validate URL
+        _validate_url(url)
+
+        logger.info(f"Starting Q-Ravens workflow for: {url}")
+
+        try:
+            graph = await self._ensure_graph()
+        except WorkflowCheckpointError:
+            raise
+        except Exception as e:
+            raise WorkflowError(f"Failed to initialize workflow: {e}") from e
 
         # Create initial state
         initial_state = {
@@ -100,10 +174,36 @@ class QRavensRunner:
 
         # Execute the workflow
         final_state = None
-        async for state in graph.astream(initial_state, config, stream_mode="values"):
-            if state and isinstance(state, dict):
-                final_state = state
+        try:
+            async for state in graph.astream(initial_state, config, stream_mode="values"):
+                if state and isinstance(state, dict):
+                    final_state = state
 
+                    # Check for error phase
+                    if state.get("phase") == WorkflowPhase.ERROR.value:
+                        errors = state.get("errors", [])
+                        error_msg = state.get("error_message", "Unknown error")
+                        logger.error(f"Workflow entered error state: {error_msg}")
+
+                    # Check for max iterations
+                    iteration = state.get("iteration_count", 0)
+                    max_iter = state.get("max_iterations", 10)
+                    if iteration >= max_iter:
+                        logger.warning(f"Maximum iterations ({max_iter}) reached")
+        except Exception as e:
+            logger.error(f"Workflow execution failed: {e}")
+            raise WorkflowError(
+                f"Workflow execution failed: {e}",
+                details={"url": url, "session_id": self.session_id},
+            ) from e
+
+        if final_state is None:
+            raise WorkflowStateError(
+                "Workflow completed without producing final state",
+                details={"url": url, "session_id": self.session_id},
+            )
+
+        logger.info(f"Workflow completed with phase: {final_state.get('phase')}")
         return final_state
 
     async def stream(
@@ -120,8 +220,22 @@ class QRavensRunner:
 
         Yields:
             State updates as the workflow progresses
+
+        Raises:
+            URLValidationError: If URL is invalid
+            WorkflowError: If workflow fails to execute
         """
-        graph = await self._ensure_graph()
+        # Validate URL
+        _validate_url(url)
+
+        logger.info(f"Starting Q-Ravens workflow stream for: {url}")
+
+        try:
+            graph = await self._ensure_graph()
+        except WorkflowCheckpointError:
+            raise
+        except Exception as e:
+            raise WorkflowError(f"Failed to initialize workflow: {e}") from e
 
         # Create initial state
         initial_state = {
@@ -141,9 +255,22 @@ class QRavensRunner:
         config = {"configurable": {"thread_id": self.session_id}}
 
         # Stream the workflow
-        async for state in graph.astream(initial_state, config, stream_mode="values"):
-            if state and isinstance(state, dict):
-                yield state
+        try:
+            async for state in graph.astream(initial_state, config, stream_mode="values"):
+                if state and isinstance(state, dict):
+                    yield state
+        except Exception as e:
+            logger.error(f"Workflow stream failed: {e}")
+            # Yield an error state so consumers know what happened
+            yield {
+                "phase": WorkflowPhase.ERROR.value,
+                "error_message": str(e),
+                "errors": [{"error_type": type(e).__name__, "message": str(e)}],
+            }
+            raise WorkflowError(
+                f"Workflow stream failed: {e}",
+                details={"url": url, "session_id": self.session_id},
+            ) from e
 
     async def resume(self, user_input: Optional[str] = None) -> dict[str, Any]:
         """
@@ -154,14 +281,36 @@ class QRavensRunner:
 
         Returns:
             Final state after workflow completion
+
+        Raises:
+            WorkflowCheckpointError: If no checkpoint found
+            WorkflowError: If workflow fails to resume
         """
-        graph = await self._ensure_graph()
+        logger.info(f"Resuming workflow for session: {self.session_id}")
+
+        try:
+            graph = await self._ensure_graph()
+        except WorkflowCheckpointError:
+            raise
+        except Exception as e:
+            raise WorkflowError(f"Failed to initialize workflow for resume: {e}") from e
+
         config = {"configurable": {"thread_id": self.session_id}}
 
         # Get current state
-        state = await graph.aget_state(config)
+        try:
+            state = await graph.aget_state(config)
+        except Exception as e:
+            raise WorkflowCheckpointError(
+                f"Failed to retrieve checkpoint: {e}",
+                details={"session_id": self.session_id},
+            ) from e
+
         if not state or not state.values:
-            raise ValueError(f"No checkpoint found for session {self.session_id}")
+            raise WorkflowCheckpointError(
+                f"No checkpoint found for session {self.session_id}",
+                details={"session_id": self.session_id},
+            )
 
         current_state = dict(state.values)
 
@@ -172,10 +321,24 @@ class QRavensRunner:
 
         # Resume the workflow
         final_state = None
-        async for state in graph.astream(current_state, config, stream_mode="values"):
-            if state and isinstance(state, dict):
-                final_state = state
+        try:
+            async for state in graph.astream(current_state, config, stream_mode="values"):
+                if state and isinstance(state, dict):
+                    final_state = state
+        except Exception as e:
+            logger.error(f"Failed to resume workflow: {e}")
+            raise WorkflowError(
+                f"Failed to resume workflow: {e}",
+                details={"session_id": self.session_id},
+            ) from e
 
+        if final_state is None:
+            raise WorkflowStateError(
+                "Resumed workflow completed without producing final state",
+                details={"session_id": self.session_id},
+            )
+
+        logger.info(f"Resumed workflow completed with phase: {final_state.get('phase')}")
         return final_state
 
     async def get_state(self) -> Optional[dict[str, Any]]:
