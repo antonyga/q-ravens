@@ -14,7 +14,7 @@ from q_ravens.core.state import QRavensState, WorkflowPhase
 
 
 # Type alias for routing decisions
-AgentName = Literal["orchestrator", "analyzer", "executor", "reporter", "human"]
+AgentName = Literal["orchestrator", "analyzer", "designer", "executor", "reporter", "human"]
 
 
 def route_next_agent(state: QRavensState) -> AgentName | str:
@@ -53,7 +53,7 @@ def route_next_agent(state: QRavensState) -> AgentName | str:
     phase_routing = {
         WorkflowPhase.INIT.value: "orchestrator",
         WorkflowPhase.ANALYZING.value: "analyzer",
-        WorkflowPhase.DESIGNING.value: "orchestrator",  # Designer not implemented yet
+        WorkflowPhase.DESIGNING.value: "designer",
         WorkflowPhase.EXECUTING.value: "executor",
         WorkflowPhase.REPORTING.value: "orchestrator",  # Reporter not implemented yet
     }
@@ -65,6 +65,7 @@ def create_graph(
     orchestrator_node,
     analyzer_node,
     executor_node,
+    designer_node=None,
     human_node=None,
 ) -> StateGraph:
     """
@@ -74,6 +75,7 @@ def create_graph(
         orchestrator_node: The orchestrator agent function
         analyzer_node: The analyzer agent function
         executor_node: The executor agent function
+        designer_node: Optional designer agent function (Test Architect)
         human_node: Optional human-in-the-loop node
 
     Returns:
@@ -87,6 +89,10 @@ def create_graph(
     workflow.add_node("analyzer", analyzer_node)
     workflow.add_node("executor", executor_node)
 
+    # Add designer node if provided
+    if designer_node:
+        workflow.add_node("designer", designer_node)
+
     # Add human node if provided (for human-in-the-loop)
     if human_node:
         workflow.add_node("human", human_node)
@@ -94,41 +100,49 @@ def create_graph(
     # Set entry point
     workflow.set_entry_point("orchestrator")
 
+    # Build routing map for conditional edges
+    base_routes = {
+        "orchestrator": "orchestrator",
+        "analyzer": "analyzer",
+        "executor": "executor",
+        END: END,
+    }
+
+    # Add designer route if available
+    if designer_node:
+        base_routes["designer"] = "designer"
+
+    # Add human route if available
+    if human_node:
+        base_routes["human"] = "human"
+
     # Add conditional edges from orchestrator
     workflow.add_conditional_edges(
         "orchestrator",
         route_next_agent,
-        {
-            "orchestrator": "orchestrator",
-            "analyzer": "analyzer",
-            "executor": "executor",
-            "human": "human" if human_node else END,
-            END: END,
-        },
+        base_routes,
     )
 
     # Add conditional edges from analyzer
     workflow.add_conditional_edges(
         "analyzer",
         route_next_agent,
-        {
-            "orchestrator": "orchestrator",
-            "analyzer": "analyzer",
-            "executor": "executor",
-            END: END,
-        },
+        base_routes,
     )
+
+    # Add conditional edges from designer (if present)
+    if designer_node:
+        workflow.add_conditional_edges(
+            "designer",
+            route_next_agent,
+            base_routes,
+        )
 
     # Add conditional edges from executor
     workflow.add_conditional_edges(
         "executor",
         route_next_agent,
-        {
-            "orchestrator": "orchestrator",
-            "analyzer": "analyzer",
-            "executor": "executor",
-            END: END,
-        },
+        base_routes,
     )
 
     # Add edges from human node back to orchestrator
@@ -142,6 +156,7 @@ def compile_graph(
     orchestrator_node,
     analyzer_node,
     executor_node,
+    designer_node=None,
     human_node=None,
     checkpointer=None,
 ):
@@ -152,6 +167,7 @@ def compile_graph(
         orchestrator_node: The orchestrator agent function
         analyzer_node: The analyzer agent function
         executor_node: The executor agent function
+        designer_node: Optional designer agent function (Test Architect)
         human_node: Optional human-in-the-loop node
         checkpointer: Optional checkpointer for state persistence
 
@@ -162,6 +178,7 @@ def compile_graph(
         orchestrator_node=orchestrator_node,
         analyzer_node=analyzer_node,
         executor_node=executor_node,
+        designer_node=designer_node,
         human_node=human_node,
     )
 
