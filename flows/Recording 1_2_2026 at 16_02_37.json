@@ -1,0 +1,239 @@
+{
+    "title": "Recording 1/2/2026 at 16:02:37",
+    "steps": [
+        {
+            "type": "setViewport",
+            "width": 1520,
+            "height": 944,
+            "deviceScaleFactor": 1,
+            "isMobile": false,
+            "hasTouch": false,
+            "isLandscape": false
+        },
+        {
+            "type": "navigate",
+            "url": "https://gtrautoparts.com/",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://gtrautoparts.com/",
+                    "title": "Inicio - GTR AUTO PARTS"
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "div.boostify-navigation--widget > nav i"
+                ],
+                [
+                    "xpath///*[@id=\"menu-cliente-2\"]/li/a/i"
+                ],
+                [
+                    "pierce/div.boostify-navigation--widget > nav i"
+                ]
+            ],
+            "offsetY": 14.609375,
+            "offsetX": 3.828125
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Entrar / Registrar"
+                ],
+                [
+                    "div.elementor-element-97dad9a li > div a"
+                ],
+                [
+                    "xpath///*[@id=\"menu-cliente-2\"]/li/div/ul/li/a"
+                ],
+                [
+                    "pierce/div.elementor-element-97dad9a li > div a"
+                ]
+            ],
+            "offsetY": 28.609375,
+            "offsetX": 25.828125
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Usuario o email"
+                ],
+                [
+                    "#user-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"user-d441404\"]"
+                ],
+                [
+                    "pierce/#user-d441404"
+                ]
+            ],
+            "offsetY": 30.203125,
+            "offsetX": 228
+        },
+        {
+            "type": "change",
+            "value": "sample",
+            "selectors": [
+                [
+                    "aria/Usuario o email"
+                ],
+                [
+                    "#user-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"user-d441404\"]"
+                ],
+                [
+                    "pierce/#user-d441404"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Alt"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "6"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "4"
+        },
+        {
+            "type": "keyUp",
+            "key": "6",
+            "target": "main"
+        },
+        {
+            "type": "keyUp",
+            "key": "@",
+            "target": "main"
+        },
+        {
+            "type": "change",
+            "value": "sample@",
+            "selectors": [
+                [
+                    "aria/Usuario o email"
+                ],
+                [
+                    "#user-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"user-d441404\"]"
+                ],
+                [
+                    "pierce/#user-d441404"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "keyUp",
+            "key": "4",
+            "target": "main"
+        },
+        {
+            "type": "change",
+            "value": "sample@sample.com",
+            "selectors": [
+                [
+                    "aria/Usuario o email"
+                ],
+                [
+                    "#user-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"user-d441404\"]"
+                ],
+                [
+                    "pierce/#user-d441404"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Contraseña"
+                ],
+                [
+                    "#password-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"password-d441404\"]"
+                ],
+                [
+                    "pierce/#password-d441404"
+                ]
+            ],
+            "offsetY": 20.203125,
+            "offsetX": 115
+        },
+        {
+            "type": "change",
+            "value": "1234",
+            "selectors": [
+                [
+                    "aria/Contraseña"
+                ],
+                [
+                    "#password-d441404"
+                ],
+                [
+                    "xpath///*[@id=\"password-d441404\"]"
+                ],
+                [
+                    "pierce/#password-d441404"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/INICIAR SESIÓN",
+                    "aria/[role=\"generic\"]"
+                ],
+                [
+                    "#elementor-popup-modal-240073 span"
+                ],
+                [
+                    "xpath///*[@id=\"elementor-popup-modal-240073\"]/div/div[2]/div/section/div/div/div/div[2]/div/form/div/div[4]/button/span"
+                ],
+                [
+                    "pierce/#elementor-popup-modal-240073 span"
+                ],
+                [
+                    "text/Iniciar sesión"
+                ]
+            ],
+            "offsetY": 6.203125,
+            "offsetX": 67,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://gtrautoparts.com/en2admin/",
+                    "title": "Acceder < GTR AUTO PARTS — WordPress"
+                }
+            ]
+        }
+    ]
+}

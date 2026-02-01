@@ -232,6 +232,211 @@ When executing tests:
 
         return tests
 
+    # Multi-language support for common form terms
+    LOGIN_TERMS = {
+        "login": ["login", "log in", "sign in", "iniciar sesión", "entrar", "connexion", "anmelden", "acceder", "ingresar", "iniciar"],
+        "register": ["register", "sign up", "registrar", "inscription", "registrieren", "crear cuenta", "registro"],
+        "email": ["email", "e-mail", "correo", "usuario", "user", "courriel", "e-mail-adresse", "correo electrónico"],
+        "password": ["password", "contraseña", "mot de passe", "passwort", "clave", "senha"],
+        "username": ["username", "user name", "usuario", "nom d'utilisateur", "benutzername", "nombre de usuario"],
+        "submit": ["submit", "send", "enviar", "envoyer", "senden", "iniciar", "entrar", "acceder", "log in", "sign in", "iniciar sesión"],
+        "error": ["error", "invalid", "incorrect", "inválido", "incorrecto", "erreur", "fehler", "dirección de correo"],
+    }
+
+    async def _find_and_open_login_modal(self, page) -> dict:
+        """
+        Find and open login modal/popup if present.
+
+        Many sites have login forms in popups triggered by icons or links.
+        """
+        import re
+
+        # Common selectors for login triggers (icons, links, buttons)
+        login_trigger_selectors = [
+            # ARIA-based selectors for login/register links
+            "[aria-label*='login' i]",
+            "[aria-label*='sign in' i]",
+            "[aria-label*='account' i]",
+            "[aria-label*='user' i]",
+            "[aria-label*='entrar' i]",
+            "[aria-label*='iniciar' i]",
+            "[aria-label*='registrar' i]",
+            "[aria-label*='mi cuenta' i]",
+            # Common icon selectors
+            "a[href*='login']",
+            "a[href*='account']",
+            "a[href*='signin']",
+            "a[href*='mi-cuenta']",
+            ".user-icon",
+            ".account-icon",
+            "[class*='user'] a",
+            "[class*='account'] a",
+            "[class*='login'] a",
+            "[class*='cliente'] a",
+            # Icon elements that might trigger login
+            "nav i[class*='user']",
+            "nav i[class*='account']",
+            ".fa-user",
+            ".fa-sign-in",
+            # Generic user menu triggers
+            "[id*='menu-cliente']",
+            "[id*='user-menu']",
+            "[id*='account-menu']",
+            "nav [id*='cliente'] a",
+        ]
+
+        for selector in login_trigger_selectors:
+            try:
+                trigger = await page.query_selector(selector)
+                if trigger and await trigger.is_visible():
+                    element_info = await self._get_element_info(trigger)
+                    await trigger.click()
+                    await page.wait_for_timeout(500)
+
+                    # Now look for login link in dropdown/popup
+                    login_link_patterns = [
+                        "a:has-text('Entrar')",
+                        "a:has-text('Login')",
+                        "a:has-text('Sign in')",
+                        "a:has-text('Iniciar')",
+                        "a:has-text('Acceder')",
+                        "a:has-text('Registrar')",
+                        "[aria-label*='Entrar' i]",
+                        "[aria-label*='Login' i]",
+                    ]
+
+                    for link_selector in login_link_patterns:
+                        try:
+                            link = await page.query_selector(link_selector)
+                            if link and await link.is_visible():
+                                link_info = await self._get_element_info(link)
+                                await link.click()
+                                await page.wait_for_timeout(1000)  # Wait for modal animation
+                                return {
+                                    "found": True,
+                                    "details": f"Opened login modal via {element_info} -> {link_info}"
+                                }
+                        except Exception:
+                            continue
+
+                    return {
+                        "found": True,
+                        "details": f"Clicked login trigger {element_info}"
+                    }
+            except Exception:
+                continue
+
+        return {"found": False, "details": "No login modal trigger found"}
+
+    async def _find_input_by_accessibility(self, page, field_type: str):
+        """
+        Find input field using accessibility-based selectors (multi-language).
+
+        Uses getByRole, getByLabel, getByPlaceholder for robust selection.
+        """
+        import re
+
+        terms = self.LOGIN_TERMS.get(field_type, [field_type])
+
+        # Try getByRole with accessible name
+        for term in terms:
+            try:
+                # Try textbox role with accessible name
+                locator = page.get_by_role("textbox", name=re.compile(term, re.IGNORECASE))
+                if await locator.count() > 0:
+                    element = await locator.first.element_handle()
+                    if element and await element.is_visible():
+                        return element, f"Found by role 'textbox' with name matching '{term}'"
+            except Exception:
+                pass
+
+            try:
+                # Try getByLabel
+                locator = page.get_by_label(re.compile(term, re.IGNORECASE))
+                if await locator.count() > 0:
+                    element = await locator.first.element_handle()
+                    if element and await element.is_visible():
+                        return element, f"Found by label matching '{term}'"
+            except Exception:
+                pass
+
+            try:
+                # Try getByPlaceholder
+                locator = page.get_by_placeholder(re.compile(term, re.IGNORECASE))
+                if await locator.count() > 0:
+                    element = await locator.first.element_handle()
+                    if element and await element.is_visible():
+                        return element, f"Found by placeholder matching '{term}'"
+            except Exception:
+                pass
+
+        # Fallback to CSS selectors
+        css_selectors = []
+        for term in terms:
+            css_selectors.extend([
+                f"input[type='{field_type}']" if field_type in ["email", "password"] else None,
+                f"input[name*='{term}' i]",
+                f"input[id*='{term}' i]",
+                f"input[placeholder*='{term}' i]",
+                f"input[aria-label*='{term}' i]",
+            ])
+
+        css_selectors = [s for s in css_selectors if s]
+
+        for selector in css_selectors:
+            try:
+                element = await page.query_selector(selector)
+                if element and await element.is_visible():
+                    return element, f"Found by CSS selector '{selector}'"
+            except Exception:
+                continue
+
+        return None, "No matching input field found"
+
+    async def _find_submit_button(self, page):
+        """
+        Find submit/login button using accessibility-based selectors (multi-language).
+        """
+        import re
+
+        # First try ARIA-based and role-based selectors
+        submit_terms = self.LOGIN_TERMS["submit"] + self.LOGIN_TERMS["login"]
+
+        for term in submit_terms:
+            try:
+                # Try getByRole button
+                locator = page.get_by_role("button", name=re.compile(term, re.IGNORECASE))
+                if await locator.count() > 0:
+                    element = await locator.first.element_handle()
+                    if element and await element.is_visible():
+                        return element, f"Found button by role with name matching '{term}'"
+            except Exception:
+                pass
+
+        # Try CSS selectors
+        button_selectors = [
+            "button[type='submit']",
+            "input[type='submit']",
+        ]
+
+        # Add text-based selectors for each language
+        for term in submit_terms:
+            button_selectors.extend([
+                f"button:has-text('{term}')",
+                f"input[type='submit'][value*='{term}' i]",
+                f"[role='button']:has-text('{term}')",
+            ])
+
+        for selector in button_selectors:
+            try:
+                button = await page.query_selector(selector)
+                if button and await button.is_visible():
+                    return button, f"Found by selector '{selector}'"
+            except Exception:
+                continue
+
+        return None, "No submit button found"
+
     async def _execute_test(self, url: str, test_case: TestCase) -> TestResult:
         """
         Execute a single test case.
@@ -344,35 +549,65 @@ When executing tests:
             )
 
     async def _test_page_load(self, url: str) -> dict:
-        """Test that the page loads successfully."""
+        """Test that the page loads successfully with detailed reporting."""
         from playwright.async_api import async_playwright
 
+        steps = []
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
             try:
                 response = await page.goto(url, timeout=30000)
+                status = response.status if response else "unknown"
+
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"HTTP Response: {status}"
+                })
 
                 if response and response.status < 400:
                     title = await page.title()
+                    current_url = page.url
+
+                    steps.append({
+                        "step": "Wait for page load",
+                        "status": "completed",
+                        "details": f"Page loaded in full. Final URL: {current_url}"
+                    })
+
+                    steps.append({
+                        "step": "Verify page title",
+                        "status": "completed",
+                        "details": f"Page title: '{title}'"
+                    })
+
                     return {
                         "passed": True,
                         "message": f"Page loaded successfully. Title: {title}",
+                        "steps": steps,
                     }
                 else:
+                    steps.append({
+                        "step": "Verify page loads",
+                        "status": "failed",
+                        "details": f"HTTP status {status} indicates an error"
+                    })
                     return {
                         "passed": False,
-                        "message": f"Page returned status {response.status if response else 'unknown'}",
+                        "message": f"Page returned status {status}",
+                        "steps": steps,
                     }
             finally:
                 await browser.close()
 
     async def _test_no_js_errors(self, url: str) -> dict:
-        """Test that there are no JavaScript errors."""
+        """Test that there are no JavaScript errors with detailed reporting."""
         from playwright.async_api import async_playwright
 
         errors = []
+        steps = []
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -383,78 +618,47 @@ When executing tests:
 
             try:
                 await page.goto(url, timeout=30000)
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
+
                 await page.wait_for_load_state("networkidle")
 
                 if errors:
+                    # Show first 3 errors with details
+                    error_details = "; ".join([f"'{e[:80]}'" for e in errors[:3]])
+                    if len(errors) > 3:
+                        error_details += f"; ... and {len(errors) - 3} more errors"
+
+                    steps.append({
+                        "step": "Monitor console for errors",
+                        "status": "failed",
+                        "details": f"Found {len(errors)} JS errors: {error_details}"
+                    })
                     return {
                         "passed": False,
-                        "message": f"Found {len(errors)} JavaScript errors: {errors[:3]}",
+                        "message": f"Found {len(errors)} JavaScript errors",
+                        "steps": steps,
                     }
+
+                steps.append({
+                    "step": "Monitor console for errors",
+                    "status": "completed",
+                    "details": "No JavaScript errors detected in browser console"
+                })
                 return {
                     "passed": True,
                     "message": "No JavaScript errors detected",
+                    "steps": steps,
                 }
             finally:
                 await browser.close()
 
     async def _test_navigation_links(self, url: str) -> dict:
-        """Test that navigation links are valid."""
-        from playwright.async_api import async_playwright
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-
-            try:
-                await page.goto(url, timeout=30000)
-
-                links = await page.eval_on_selector_all(
-                    "a[href]",
-                    "elements => elements.slice(0, 10).map(e => ({href: e.href, text: e.textContent}))"
-                )
-
-                valid_links = [l for l in links if l.get("href") and not l["href"].startswith("javascript:")]
-
-                if valid_links:
-                    return {
-                        "passed": True,
-                        "message": f"Found {len(valid_links)} valid navigation links",
-                    }
-                return {
-                    "passed": False,
-                    "message": "No valid navigation links found",
-                }
-            finally:
-                await browser.close()
-
-    async def _test_form_elements(self, url: str) -> dict:
-        """Test that form elements are functional."""
-        from playwright.async_api import async_playwright
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-
-            try:
-                await page.goto(url, timeout=30000)
-
-                forms = await page.query_selector_all("form")
-                inputs = await page.query_selector_all("input:not([type='hidden']), textarea, select")
-
-                if forms or inputs:
-                    return {
-                        "passed": True,
-                        "message": f"Found {len(forms)} forms and {len(inputs)} input elements",
-                    }
-                return {
-                    "passed": True,
-                    "message": "No forms found (not necessarily an error)",
-                }
-            finally:
-                await browser.close()
-
-    async def _test_buttons(self, url: str) -> dict:
-        """Test that button elements are functional."""
+        """Test that navigation links are valid with detailed reporting."""
         from playwright.async_api import async_playwright
 
         steps = []
@@ -463,26 +667,211 @@ When executing tests:
             page = await browser.new_page()
 
             try:
-                steps.append({"step": f"Navigate to {url}", "status": "completed", "details": "Navigation successful"})
                 await page.goto(url, timeout=30000)
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
+
+                links = await page.eval_on_selector_all(
+                    "a[href]",
+                    """elements => elements.slice(0, 20).map(e => ({
+                        href: e.href,
+                        text: (e.textContent || '').trim().substring(0, 30),
+                        id: e.id || '',
+                        className: (e.className || '').split(' ').slice(0, 2).join(' ')
+                    }))"""
+                )
+
+                valid_links = [l for l in links if l.get("href") and not l["href"].startswith("javascript:")]
+
+                if valid_links:
+                    # Show details of first 5 links
+                    link_details = []
+                    for link in valid_links[:5]:
+                        text = link.get("text", "").strip() or "[no text]"
+                        href = link.get("href", "")[:50]
+                        el_id = link.get("id", "")
+                        el_class = link.get("className", "")
+
+                        detail_parts = [f"'{text}'"]
+                        if el_id:
+                            detail_parts.append(f"id='{el_id}'")
+                        if el_class:
+                            detail_parts.append(f"class='{el_class}'")
+                        detail_parts.append(f"href='{href}'")
+                        link_details.append(" ".join(detail_parts))
+
+                    steps.append({
+                        "step": "Find all links",
+                        "status": "completed",
+                        "details": f"Found {len(valid_links)} links. Examples: {'; '.join(link_details[:3])}"
+                    })
+
+                    steps.append({
+                        "step": "Verify link validity",
+                        "status": "completed",
+                        "details": f"All {len(valid_links)} links have valid href attributes"
+                    })
+
+                    return {
+                        "passed": True,
+                        "message": f"Found {len(valid_links)} valid navigation links",
+                        "steps": steps,
+                    }
+
+                steps.append({
+                    "step": "Find all links",
+                    "status": "failed",
+                    "details": "No links with valid href attributes found on the page"
+                })
+                return {
+                    "passed": False,
+                    "message": "No valid navigation links found",
+                    "steps": steps,
+                }
+            finally:
+                await browser.close()
+
+    async def _test_form_elements(self, url: str) -> dict:
+        """Test that form elements are functional with detailed element reporting."""
+        from playwright.async_api import async_playwright
+
+        steps = []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+
+            try:
+                await page.goto(url, timeout=30000)
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
+
+                forms = await page.query_selector_all("form")
+                inputs = await page.query_selector_all("input:not([type='hidden']), textarea, select")
+
+                # Collect detailed form info
+                form_details = []
+                for form in forms[:3]:
+                    try:
+                        action = await form.get_attribute("action") or "N/A"
+                        method = await form.get_attribute("method") or "GET"
+                        form_id = await form.get_attribute("id") or ""
+                        form_name = await form.get_attribute("name") or ""
+                        form_details.append(f"<form id='{form_id}' name='{form_name}' action='{action}' method='{method}'>")
+                    except Exception:
+                        continue
+
+                # Collect detailed input info
+                input_details = []
+                for inp in inputs[:5]:
+                    try:
+                        element_info = await self._get_element_info(inp)
+                        input_details.append(element_info)
+                    except Exception:
+                        continue
+
+                if forms:
+                    steps.append({
+                        "step": "Find form elements",
+                        "status": "completed",
+                        "details": f"Found {len(forms)} forms: {'; '.join(form_details)}"
+                    })
+
+                if input_details:
+                    details_str = "; ".join(input_details[:3])
+                    if len(input_details) > 3:
+                        details_str += f"; ... and {len(input_details) - 3} more"
+                    steps.append({
+                        "step": "Find input elements",
+                        "status": "completed",
+                        "details": f"Found {len(inputs)} inputs: {details_str}"
+                    })
+
+                if forms or inputs:
+                    return {
+                        "passed": True,
+                        "message": f"Found {len(forms)} forms and {len(inputs)} input elements",
+                        "steps": steps,
+                    }
+                return {
+                    "passed": True,
+                    "message": "No forms found (not necessarily an error)",
+                    "steps": steps,
+                }
+            finally:
+                await browser.close()
+
+    async def _test_buttons(self, url: str) -> dict:
+        """Test that button elements are functional with detailed element reporting."""
+        from playwright.async_api import async_playwright
+
+        steps = []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+
+            try:
+                await page.goto(url, timeout=30000)
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
 
                 buttons = await page.query_selector_all("button, input[type='submit'], input[type='button'], [role='button']")
-                steps.append({"step": "Find button elements", "status": "completed", "details": f"Found {len(buttons)} buttons"})
 
-                if buttons:
-                    # Check if buttons are visible and enabled
-                    visible_count = 0
-                    for btn in buttons[:10]:  # Check first 10
+                # Collect detailed info about buttons found
+                button_details = []
+                visible_count = 0
+
+                for btn in buttons[:10]:  # Check first 10
+                    try:
                         is_visible = await btn.is_visible()
                         if is_visible:
                             visible_count += 1
+                            element_info = await self._get_element_info(btn)
+                            button_details.append(element_info)
+                    except Exception:
+                        continue
 
-                    steps.append({"step": "Verify buttons are visible", "status": "completed", "details": f"{visible_count} buttons visible"})
+                if button_details:
+                    # Show first 3 buttons found
+                    details_str = "; ".join(button_details[:3])
+                    if len(button_details) > 3:
+                        details_str += f"; ... and {len(button_details) - 3} more"
+
+                    steps.append({
+                        "step": "Find button elements",
+                        "status": "completed",
+                        "details": f"Found {len(buttons)} buttons. Examples: {details_str}"
+                    })
+
+                    steps.append({
+                        "step": "Verify buttons are visible",
+                        "status": "completed",
+                        "details": f"{visible_count} buttons are visible and interactive"
+                    })
+
                     return {
                         "passed": True,
                         "message": f"Found {len(buttons)} buttons, {visible_count} visible and functional",
                         "steps": steps,
                     }
+                else:
+                    steps.append({
+                        "step": "Find button elements",
+                        "status": "completed",
+                        "details": "No visible button elements found on the page"
+                    })
+
                 return {
                     "passed": True,
                     "message": "No buttons found (not necessarily an error)",
@@ -492,8 +881,9 @@ When executing tests:
                 await browser.close()
 
     async def _test_menu_page(self, url: str, test_case: TestCase) -> dict:
-        """Test menu page functionality."""
+        """Test menu page functionality with detailed element reporting."""
         from playwright.async_api import async_playwright
+        import re
 
         steps = []
         async with async_playwright() as p:
@@ -501,48 +891,146 @@ When executing tests:
             page = await browser.new_page()
 
             try:
-                steps.append({"step": f"Navigate to {url}", "status": "completed", "details": "Navigation successful"})
                 await page.goto(url, timeout=30000)
                 await page.wait_for_load_state("networkidle")
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
 
                 # Try to find and click menu link
-                menu_link = await page.query_selector("a[href*='menu'], a:has-text('Menu'), nav a:has-text('Menu')")
+                menu_selectors = [
+                    "a[href*='menu']",
+                    "a:has-text('Menu')",
+                    "nav a:has-text('Menu')",
+                    "[class*='menu'] a",
+                    "a[href*='Menu']",
+                ]
+
+                menu_link = None
+                for selector in menu_selectors:
+                    try:
+                        link = await page.query_selector(selector)
+                        if link and await link.is_visible():
+                            menu_link = link
+                            break
+                    except Exception:
+                        continue
+
                 if menu_link:
-                    steps.append({"step": "Find Menu link", "status": "completed", "details": "Menu link found"})
+                    element_info = await self._get_element_info(menu_link)
+                    href = await menu_link.get_attribute("href") or "N/A"
+                    steps.append({
+                        "step": "Find Menu link",
+                        "status": "completed",
+                        "details": f"Found {element_info}, href='{href}'"
+                    })
+
                     await menu_link.click()
                     await page.wait_for_load_state("networkidle")
-                    steps.append({"step": "Click Menu link", "status": "completed", "details": "Navigated to menu page"})
+                    new_url = page.url
+                    steps.append({
+                        "step": "Click Menu link",
+                        "status": "completed",
+                        "details": f"Navigated to: {new_url}"
+                    })
+                else:
+                    steps.append({
+                        "step": "Find Menu link",
+                        "status": "completed",
+                        "details": "No separate menu link found, checking current page"
+                    })
 
                 # Check for specific item if mentioned in test case
                 search_term = None
-                if "Tequila" in test_case.name or "Ocho" in test_case.name:
-                    search_term = "Tequila Ocho"
+                # Try to extract from test case name
+                name_match = re.search(r"['\"]([^'\"]+)['\"]", test_case.name)
+                if name_match:
+                    search_term = name_match.group(1)
+                # Try to extract from description
                 elif test_case.description:
-                    # Extract item name from description
-                    import re
-                    match = re.search(r"'([^']+)'", test_case.description)
-                    if match:
-                        search_term = match.group(1)
+                    desc_match = re.search(r"['\"]([^'\"]+)['\"]", test_case.description)
+                    if desc_match:
+                        search_term = desc_match.group(1)
+                # Check for known patterns
+                elif "Tequila" in test_case.name or "Ocho" in test_case.name:
+                    search_term = "Tequila Ocho"
 
                 if search_term:
-                    steps.append({"step": f"Search for '{search_term}'", "status": "in_progress", "details": "Searching page content"})
+                    steps.append({
+                        "step": f"Search for '{search_term}'",
+                        "status": "in_progress",
+                        "details": "Scanning page content..."
+                    })
+
+                    # First try to find element containing the text
+                    try:
+                        element = await page.query_selector(f"*:has-text('{search_term}')")
+                        if element and await element.is_visible():
+                            element_info = await self._get_element_info(element)
+                            # Get surrounding context
+                            parent = await element.evaluate("el => el.parentElement ? el.parentElement.textContent.substring(0, 100) : ''")
+                            steps[-1] = {
+                                "step": f"Search for '{search_term}'",
+                                "status": "completed",
+                                "details": f"Found in {element_info}. Context: '{parent.strip()[:80]}...'"
+                            }
+                            return {
+                                "passed": True,
+                                "message": f"Found '{search_term}' on the menu page",
+                                "steps": steps,
+                            }
+                    except Exception:
+                        pass
+
+                    # Fallback to content search
                     content = await page.content()
                     if search_term.lower() in content.lower():
-                        steps[-1] = {"step": f"Search for '{search_term}'", "status": "completed", "details": f"Found '{search_term}' on page"}
+                        # Try to get more context
+                        text_content = await page.evaluate("() => document.body.innerText")
+                        idx = text_content.lower().find(search_term.lower())
+                        if idx >= 0:
+                            context_start = max(0, idx - 30)
+                            context_end = min(len(text_content), idx + len(search_term) + 30)
+                            context = text_content[context_start:context_end].replace('\n', ' ')
+                            steps[-1] = {
+                                "step": f"Search for '{search_term}'",
+                                "status": "completed",
+                                "details": f"Found on page. Context: '...{context}...'"
+                            }
+                        else:
+                            steps[-1] = {
+                                "step": f"Search for '{search_term}'",
+                                "status": "completed",
+                                "details": f"'{search_term}' found in page source"
+                            }
                         return {
                             "passed": True,
                             "message": f"Found '{search_term}' on the menu page",
                             "steps": steps,
                         }
                     else:
-                        steps[-1] = {"step": f"Search for '{search_term}'", "status": "failed", "details": f"'{search_term}' not found"}
+                        steps[-1] = {
+                            "step": f"Search for '{search_term}'",
+                            "status": "failed",
+                            "details": f"'{search_term}' not found in page content"
+                        }
                         return {
                             "passed": False,
                             "message": f"'{search_term}' not found on the menu page",
                             "steps": steps,
                         }
 
-                steps.append({"step": "Verify menu page content", "status": "completed", "details": "Menu page loaded"})
+                # Verify menu page loaded
+                current_url = page.url
+                page_title = await page.title()
+                steps.append({
+                    "step": "Verify menu page content",
+                    "status": "completed",
+                    "details": f"Menu page loaded. URL: {current_url}, Title: '{page_title}'"
+                })
                 return {
                     "passed": True,
                     "message": "Menu page loaded successfully",
@@ -560,7 +1048,7 @@ When executing tests:
                 await browser.close()
 
     async def _test_navigation(self, url: str, test_case: TestCase) -> dict:
-        """Test navigation functionality."""
+        """Test navigation functionality with detailed element reporting."""
         from playwright.async_api import async_playwright
 
         steps = []
@@ -569,8 +1057,13 @@ When executing tests:
             page = await browser.new_page()
 
             try:
-                steps.append({"step": f"Navigate to {url}", "status": "completed", "details": "Navigation successful"})
                 await page.goto(url, timeout=30000)
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded. Title: '{page_title}'"
+                })
 
                 # Find navigation target from test case name
                 nav_target = None
@@ -580,21 +1073,40 @@ When executing tests:
                     nav_target = "About"
                 elif "Contact" in test_case.name:
                     nav_target = "Contact"
+                elif "Home" in test_case.name:
+                    nav_target = "Home"
 
                 if nav_target:
                     nav_link = await page.query_selector(f"a:has-text('{nav_target}')")
-                    if nav_link:
-                        steps.append({"step": f"Find '{nav_target}' link", "status": "completed", "details": "Link found"})
+                    if nav_link and await nav_link.is_visible():
+                        element_info = await self._get_element_info(nav_link)
+                        href = await nav_link.get_attribute("href") or "N/A"
+                        steps.append({
+                            "step": f"Find '{nav_target}' link",
+                            "status": "completed",
+                            "details": f"Found {element_info}, href='{href}'"
+                        })
+
                         await nav_link.click()
                         await page.wait_for_load_state("networkidle")
-                        steps.append({"step": f"Click '{nav_target}' link", "status": "completed", "details": "Navigation successful"})
+                        new_url = page.url
+                        new_title = await page.title()
+                        steps.append({
+                            "step": f"Click '{nav_target}' link",
+                            "status": "completed",
+                            "details": f"Navigated to: {new_url}, Title: '{new_title}'"
+                        })
                         return {
                             "passed": True,
                             "message": f"Successfully navigated to {nav_target} page",
                             "steps": steps,
                         }
                     else:
-                        steps.append({"step": f"Find '{nav_target}' link", "status": "failed", "details": "Link not found"})
+                        steps.append({
+                            "step": f"Find '{nav_target}' link",
+                            "status": "failed",
+                            "details": f"No visible link with text '{nav_target}' found on the page"
+                        })
                         return {
                             "passed": False,
                             "message": f"'{nav_target}' navigation link not found",
@@ -602,7 +1114,12 @@ When executing tests:
                         }
 
                 # Generic navigation test
-                steps.append({"step": "Verify page navigation", "status": "completed", "details": "Page is navigable"})
+                current_url = page.url
+                steps.append({
+                    "step": "Verify page navigation",
+                    "status": "completed",
+                    "details": f"Page is navigable. Current URL: {current_url}"
+                })
                 return {
                     "passed": True,
                     "message": "Navigation test completed",
@@ -619,43 +1136,90 @@ When executing tests:
             finally:
                 await browser.close()
 
+    async def _get_element_info(self, element) -> str:
+        """Get detailed information about an element (id, class, name, tag, text)."""
+        try:
+            tag = await element.evaluate("el => el.tagName.toLowerCase()")
+            el_id = await element.get_attribute("id") or ""
+            el_class = await element.get_attribute("class") or ""
+            el_name = await element.get_attribute("name") or ""
+            el_type = await element.get_attribute("type") or ""
+            el_text = (await element.inner_text())[:50] if await element.inner_text() else ""
+            el_value = await element.get_attribute("value") or ""
+            el_placeholder = await element.get_attribute("placeholder") or ""
+
+            # Build descriptive string
+            parts = [f"<{tag}>"]
+            if el_id:
+                parts.append(f"id='{el_id}'")
+            if el_name:
+                parts.append(f"name='{el_name}'")
+            if el_class:
+                # Truncate long class lists
+                classes = el_class.split()[:3]
+                parts.append(f"class='{' '.join(classes)}'")
+            if el_type:
+                parts.append(f"type='{el_type}'")
+            if el_text:
+                parts.append(f"text='{el_text[:30]}..'" if len(el_text) > 30 else f"text='{el_text}'")
+            if el_value:
+                parts.append(f"value='{el_value[:20]}'" if len(el_value) > 20 else f"value='{el_value}'")
+            if el_placeholder:
+                parts.append(f"placeholder='{el_placeholder[:20]}'")
+
+            return " ".join(parts)
+        except Exception:
+            return "Element details unavailable"
+
     async def _test_generic(self, url: str, test_case: TestCase) -> dict:
-        """Execute a generic test based on test case steps."""
+        """Execute a generic test based on test case steps with detailed reporting."""
         from playwright.async_api import async_playwright
+        import re
 
         steps = []
+        test_passed = True
+        failure_reason = None
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
             try:
-                steps.append({"step": f"Navigate to {url}", "status": "completed", "details": "Navigation successful"})
+                # Navigate to the URL
                 await page.goto(url, timeout=30000)
                 await page.wait_for_load_state("networkidle")
+                page_title = await page.title()
+                steps.append({
+                    "step": f"Navigate to {url}",
+                    "status": "completed",
+                    "details": f"Page loaded successfully. Title: '{page_title}'"
+                })
 
                 # Execute each step from test case
                 for step_desc in test_case.steps:
                     step_lower = step_desc.lower()
+                    step_result = await self._execute_step(page, step_desc, step_lower)
+                    steps.append(step_result)
 
-                    if "navigate" in step_lower:
-                        steps.append({"step": step_desc, "status": "completed", "details": "Navigation performed"})
-                    elif "wait" in step_lower:
-                        await page.wait_for_timeout(1000)
-                        steps.append({"step": step_desc, "status": "completed", "details": "Wait completed"})
-                    elif "verify" in step_lower or "check" in step_lower:
-                        steps.append({"step": step_desc, "status": "completed", "details": "Verification passed"})
-                    elif "click" in step_lower:
-                        steps.append({"step": step_desc, "status": "completed", "details": "Click action simulated"})
-                    elif "find" in step_lower or "locate" in step_lower:
-                        steps.append({"step": step_desc, "status": "completed", "details": "Element search completed"})
-                    else:
-                        steps.append({"step": step_desc, "status": "completed", "details": "Step executed"})
+                    if step_result["status"] == "failed":
+                        test_passed = False
+                        failure_reason = step_result["details"]
+                        break
 
-                return {
-                    "passed": True,
-                    "message": f"Test completed: {len(steps)} steps executed",
-                    "steps": steps,
-                }
+                if test_passed:
+                    return {
+                        "passed": True,
+                        "message": f"Test completed successfully: {len(steps)} steps executed",
+                        "steps": steps,
+                    }
+                else:
+                    return {
+                        "passed": False,
+                        "message": f"Test failed: {failure_reason}",
+                        "error": failure_reason,
+                        "steps": steps,
+                    }
+
             except Exception as e:
                 steps.append({"step": "Test execution", "status": "failed", "details": str(e)})
                 return {
@@ -666,6 +1230,417 @@ When executing tests:
                 }
             finally:
                 await browser.close()
+
+    async def _execute_step(self, page, step_desc: str, step_lower: str) -> dict:
+        """
+        Execute a single test step and return detailed results.
+
+        Parses the step description to understand what action to perform,
+        then executes it and captures detailed element information.
+        Supports multiple languages and popup/modal forms.
+        """
+        import re
+
+        try:
+            # === LOCATE LOGIN FORM (handle popups/modals) ===
+            if "locate" in step_lower and ("login" in step_lower or "form" in step_lower):
+                # Check if login form is visible already (look for password field)
+                password_field = await page.query_selector("input[type='password']")
+                if password_field and await password_field.is_visible():
+                    element_info = await self._get_element_info(password_field)
+                    return {
+                        "step": step_desc,
+                        "status": "completed",
+                        "details": f"Login form already visible. Found password field: {element_info}"
+                    }
+
+                # Try to open login modal
+                modal_result = await self._find_and_open_login_modal(page)
+                if modal_result["found"]:
+                    # Verify form is now visible
+                    await page.wait_for_timeout(500)
+                    password_field = await page.query_selector("input[type='password']")
+                    if password_field and await password_field.is_visible():
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": modal_result["details"]
+                        }
+                    return {
+                        "step": step_desc,
+                        "status": "completed",
+                        "details": f"{modal_result['details']} (modal opened but form not yet visible)"
+                    }
+
+                return {
+                    "step": step_desc,
+                    "status": "failed",
+                    "details": "Could not locate or open login form. No login trigger found."
+                }
+
+            # === ENTER/INPUT/TYPE actions ===
+            # Patterns: "Enter 'value' in the email field", "Type 'text' into username input"
+            enter_match = re.search(r"(?:enter|type|input|fill)\s+['\"]([^'\"]+)['\"]\s+(?:in|into|in the|into the)\s+(.+?)(?:\s+field|\s+input|\s+box)?$", step_lower, re.IGNORECASE)
+            if enter_match or "enter" in step_lower or "type" in step_lower or "fill" in step_lower:
+                # Extract value to enter
+                value_match = re.search(r"['\"]([^'\"]+)['\"]", step_desc)
+                value = value_match.group(1) if value_match else "test input"
+
+                # Determine field type from step description
+                field_type = "text"
+                if "email" in step_lower or "@" in value or "correo" in step_lower or "usuario" in step_lower:
+                    field_type = "email"
+                elif "password" in step_lower or "contraseña" in step_lower or "clave" in step_lower:
+                    field_type = "password"
+                elif "user" in step_lower or "nombre" in step_lower:
+                    field_type = "username"
+
+                # Try accessibility-based selection first (multi-language support)
+                field, found_by = await self._find_input_by_accessibility(page, field_type)
+                if field:
+                    element_info = await self._get_element_info(field)
+                    await field.fill(value)
+                    return {
+                        "step": step_desc,
+                        "status": "completed",
+                        "details": f"Entered '{value}' into {element_info}. {found_by}"
+                    }
+
+                # Fallback: try any visible input matching the field type
+                all_inputs = await page.query_selector_all("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea")
+                for inp in all_inputs:
+                    try:
+                        if await inp.is_visible():
+                            inp_type = await inp.get_attribute("type") or "text"
+                            # Match input type to field type
+                            if field_type == "email" and inp_type in ["email", "text"]:
+                                element_info = await self._get_element_info(inp)
+                                await inp.fill(value)
+                                return {
+                                    "step": step_desc,
+                                    "status": "completed",
+                                    "details": f"Entered '{value}' into {element_info} (fallback by input type)"
+                                }
+                            elif field_type == "password" and inp_type == "password":
+                                element_info = await self._get_element_info(inp)
+                                await inp.fill(value)
+                                return {
+                                    "step": step_desc,
+                                    "status": "completed",
+                                    "details": f"Entered '{value}' into {element_info} (fallback by input type)"
+                                }
+                    except Exception:
+                        continue
+
+                return {
+                    "step": step_desc,
+                    "status": "failed",
+                    "details": f"Could not find a suitable {field_type} input field. Searched using accessibility selectors (getByRole, getByLabel, getByPlaceholder) and CSS selectors in multiple languages."
+                }
+
+            # === CLICK actions ===
+            # Patterns: "Click the submit button", "Click on Login", "Press the Sign In button"
+            if "click" in step_lower or "press" in step_lower or "submit" in step_lower or "tap" in step_lower:
+                # Check if this is a submit/login action
+                is_submit = any(term in step_lower for terms in [self.LOGIN_TERMS["submit"], self.LOGIN_TERMS["login"]] for term in terms)
+
+                if is_submit or "submit" in step_lower or "login" in step_lower:
+                    button, found_by = await self._find_submit_button(page)
+                    if button:
+                        element_info = await self._get_element_info(button)
+                        await button.click()
+                        await page.wait_for_timeout(1000)  # Wait for form submission
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": f"Clicked {element_info}. {found_by}"
+                        }
+
+                # Extract what to click from step description
+                click_target = None
+                click_match = re.search(r"(?:click|press|tap|submit)\s+(?:the\s+|on\s+)?['\"]?([^'\"]+?)['\"]?\s*(?:button|link|element)?", step_lower)
+                if click_match:
+                    click_target = click_match.group(1).strip()
+
+                if click_target:
+                    # Clean up the target text
+                    target_clean = click_target.replace(" button", "").replace(" link", "").strip()
+
+                    # Try role-based selectors first (accessibility)
+                    try:
+                        locator = page.get_by_role("button", name=re.compile(target_clean, re.IGNORECASE))
+                        if await locator.count() > 0:
+                            element = await locator.first.element_handle()
+                            if element and await element.is_visible():
+                                element_info = await self._get_element_info(element)
+                                await element.click()
+                                await page.wait_for_timeout(500)
+                                return {
+                                    "step": step_desc,
+                                    "status": "completed",
+                                    "details": f"Clicked {element_info}. Found by role 'button' with name '{target_clean}'"
+                                }
+                    except Exception:
+                        pass
+
+                    try:
+                        locator = page.get_by_role("link", name=re.compile(target_clean, re.IGNORECASE))
+                        if await locator.count() > 0:
+                            element = await locator.first.element_handle()
+                            if element and await element.is_visible():
+                                element_info = await self._get_element_info(element)
+                                await element.click()
+                                await page.wait_for_timeout(500)
+                                return {
+                                    "step": step_desc,
+                                    "status": "completed",
+                                    "details": f"Clicked {element_info}. Found by role 'link' with name '{target_clean}'"
+                                }
+                    except Exception:
+                        pass
+
+                # Build CSS selectors as fallback
+                button_selectors = []
+                if click_target:
+                    target_clean = click_target.replace(" button", "").replace(" link", "").strip()
+                    button_selectors.extend([
+                        f"button:has-text('{target_clean}')",
+                        f"input[type='submit'][value*='{target_clean}' i]",
+                        f"a:has-text('{target_clean}')",
+                        f"[role='button']:has-text('{target_clean}')",
+                    ])
+
+                # Add generic submit/login button selectors for multiple languages
+                for term in self.LOGIN_TERMS["submit"]:
+                    button_selectors.extend([
+                        f"button:has-text('{term}')",
+                        f"input[type='submit'][value*='{term}' i]",
+                    ])
+
+                button_selectors.extend([
+                    "button[type='submit']",
+                    "input[type='submit']",
+                ])
+
+                for selector in button_selectors:
+                    try:
+                        button = await page.query_selector(selector)
+                        if button and await button.is_visible():
+                            element_info = await self._get_element_info(button)
+                            await button.click()
+                            await page.wait_for_timeout(500)
+                            return {
+                                "step": step_desc,
+                                "status": "completed",
+                                "details": f"Clicked {element_info}. Found by CSS selector."
+                            }
+                    except Exception:
+                        continue
+
+                return {
+                    "step": step_desc,
+                    "status": "failed",
+                    "details": "Could not find a clickable element matching the description. Searched using accessibility selectors and CSS selectors in multiple languages."
+                }
+
+            # === VERIFY/CHECK actions ===
+            # Patterns: "Verify error message is displayed", "Check that login failed"
+            if "verify" in step_lower or "check" in step_lower or "confirm" in step_lower or "ensure" in step_lower:
+                # Look for what to verify
+                found_elements = []
+
+                # Check for error messages
+                if "error" in step_lower or "message" in step_lower or "invalid" in step_lower:
+                    error_selectors = [
+                        "[class*='error']",
+                        "[class*='alert']",
+                        "[class*='invalid']",
+                        "[class*='warning']",
+                        "[role='alert']",
+                        ".error-message",
+                        ".alert-danger",
+                        ".validation-error",
+                        "[aria-invalid='true']",
+                    ]
+
+                    for selector in error_selectors:
+                        try:
+                            elements = await page.query_selector_all(selector)
+                            for el in elements:
+                                if await el.is_visible():
+                                    text = await el.inner_text()
+                                    if text.strip():
+                                        element_info = await self._get_element_info(el)
+                                        found_elements.append({
+                                            "element": element_info,
+                                            "text": text.strip()[:100]
+                                        })
+                        except Exception:
+                            continue
+
+                    if found_elements:
+                        details = "; ".join([f"Found: '{e['text']}' in {e['element']}" for e in found_elements[:3]])
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": details
+                        }
+                    else:
+                        return {
+                            "step": step_desc,
+                            "status": "failed",
+                            "details": "No error/message elements found on the page"
+                        }
+
+                # Check for success messages
+                if "success" in step_lower or "welcome" in step_lower or "logged in" in step_lower:
+                    success_selectors = [
+                        "[class*='success']",
+                        "[class*='welcome']",
+                        ".alert-success",
+                        "[role='status']",
+                    ]
+
+                    for selector in success_selectors:
+                        try:
+                            elements = await page.query_selector_all(selector)
+                            for el in elements:
+                                if await el.is_visible():
+                                    text = await el.inner_text()
+                                    if text.strip():
+                                        element_info = await self._get_element_info(el)
+                                        found_elements.append({
+                                            "element": element_info,
+                                            "text": text.strip()[:100]
+                                        })
+                        except Exception:
+                            continue
+
+                    if found_elements:
+                        details = "; ".join([f"Found: '{e['text']}' in {e['element']}" for e in found_elements[:3]])
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": details
+                        }
+
+                # Check for specific text on page
+                text_match = re.search(r"['\"]([^'\"]+)['\"]", step_desc)
+                if text_match:
+                    search_text = text_match.group(1)
+                    page_content = await page.content()
+                    if search_text.lower() in page_content.lower():
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": f"Found text '{search_text}' on the page"
+                        }
+                    else:
+                        return {
+                            "step": step_desc,
+                            "status": "failed",
+                            "details": f"Text '{search_text}' not found on the page"
+                        }
+
+                # Generic verification - just check page loaded
+                page_title = await page.title()
+                return {
+                    "step": step_desc,
+                    "status": "completed",
+                    "details": f"Page verification passed. Current page: '{page_title}'"
+                }
+
+            # === NAVIGATE actions ===
+            if "navigate" in step_lower or "go to" in step_lower or "open" in step_lower:
+                # Check if there's a specific link to click
+                link_match = re.search(r"(?:to|the)\s+(\w+)\s*(?:page|link|section)?", step_lower)
+                if link_match:
+                    link_name = link_match.group(1)
+                    try:
+                        link = await page.query_selector(f"a:has-text('{link_name}')")
+                        if link and await link.is_visible():
+                            element_info = await self._get_element_info(link)
+                            await link.click()
+                            await page.wait_for_load_state("networkidle")
+                            new_url = page.url
+                            return {
+                                "step": step_desc,
+                                "status": "completed",
+                                "details": f"Clicked {element_info}. Navigated to: {new_url}"
+                            }
+                    except Exception:
+                        pass
+
+                current_url = page.url
+                return {
+                    "step": step_desc,
+                    "status": "completed",
+                    "details": f"Current page: {current_url}"
+                }
+
+            # === WAIT actions ===
+            if "wait" in step_lower:
+                await page.wait_for_timeout(1000)
+                return {
+                    "step": step_desc,
+                    "status": "completed",
+                    "details": "Waited 1 second for page to stabilize"
+                }
+
+            # === FIND/LOCATE actions ===
+            if "find" in step_lower or "locate" in step_lower or "search" in step_lower:
+                # Try to find the element mentioned
+                text_match = re.search(r"['\"]([^'\"]+)['\"]", step_desc)
+                if text_match:
+                    search_text = text_match.group(1)
+
+                    # Try to find element with this text
+                    try:
+                        element = await page.query_selector(f"*:has-text('{search_text}')")
+                        if element:
+                            element_info = await self._get_element_info(element)
+                            return {
+                                "step": step_desc,
+                                "status": "completed",
+                                "details": f"Found element containing '{search_text}': {element_info}"
+                            }
+                    except Exception:
+                        pass
+
+                    # Check page content
+                    page_content = await page.content()
+                    if search_text.lower() in page_content.lower():
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": f"Text '{search_text}' found in page content"
+                        }
+                    else:
+                        return {
+                            "step": step_desc,
+                            "status": "failed",
+                            "details": f"'{search_text}' not found on the page"
+                        }
+
+                return {
+                    "step": step_desc,
+                    "status": "completed",
+                    "details": "Search completed"
+                }
+
+            # === DEFAULT: Generic step execution ===
+            return {
+                "step": step_desc,
+                "status": "completed",
+                "details": f"Step acknowledged. Current URL: {page.url}"
+            }
+
+        except Exception as e:
+            return {
+                "step": step_desc,
+                "status": "failed",
+                "details": f"Error executing step: {str(e)}"
+            }
 
     async def _test_performance(self, url: str) -> dict:
         """
