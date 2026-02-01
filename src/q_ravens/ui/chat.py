@@ -362,7 +362,7 @@ def render_progress_timeline(workflow_state: dict[str, Any]) -> None:
 
 def render_test_results(test_results: list) -> None:
     """
-    Render test results in an organized view.
+    Render test results in an organized view with detailed step information.
 
     Args:
         test_results: List of test results (TestResult objects or dictionaries)
@@ -401,23 +401,77 @@ def render_test_results(test_results: list) -> None:
     for i, result in enumerate(test_results):
         status = get_result_attr(result, "status", "unknown")
         status_icon = {"passed": "✅", "failed": "❌", "skipped": "⏭️"}.get(status, "❓")
-        test_name = get_result_attr(result, "test_id") or get_result_attr(result, "test_name") or f"Test {i+1}"
+        test_name = get_result_attr(result, "test_name") or get_result_attr(result, "test_id") or f"Test {i+1}"
+        category = get_result_attr(result, "category", "")
+        priority = get_result_attr(result, "priority", "")
 
-        with st.expander(f"{status_icon} {test_name}"):
-            st.markdown(f"**Status:** {status.upper() if status else 'UNKNOWN'}")
+        # Create expander title with category if available
+        expander_title = f"{status_icon} {test_name}"
+        if category:
+            expander_title += f" [{category}]"
 
-            duration = get_result_attr(result, "duration_ms", 0)
-            if duration:
+        with st.expander(expander_title):
+            # Status and basic info in columns
+            col_status, col_duration, col_priority = st.columns(3)
+            with col_status:
+                status_color = {"passed": "green", "failed": "red", "skipped": "orange"}.get(status, "gray")
+                st.markdown(f"**Status:** :{status_color}[{status.upper() if status else 'UNKNOWN'}]")
+            with col_duration:
+                duration = get_result_attr(result, "duration_ms", 0)
                 st.markdown(f"**Duration:** {duration}ms")
+            with col_priority:
+                if priority:
+                    priority_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(priority, "⚪")
+                    st.markdown(f"**Priority:** {priority_icon} {priority.title()}")
 
+            # Description
+            description = get_result_attr(result, "description")
+            if description:
+                st.markdown(f"**Description:** {description}")
+
+            # Expected vs Actual Result
+            expected = get_result_attr(result, "expected_result")
+            actual = get_result_attr(result, "actual_result")
+
+            if expected or actual:
+                st.markdown("---")
+                if expected:
+                    st.markdown(f"**Expected:** {expected}")
+                if actual:
+                    st.markdown(f"**Actual Result:** {actual}")
+
+            # Steps Executed - Show detailed execution steps
+            steps_executed = get_result_attr(result, "steps_executed", [])
+            if steps_executed:
+                st.markdown("---")
+                st.markdown("**Steps Executed:**")
+                for j, step in enumerate(steps_executed):
+                    if isinstance(step, dict):
+                        step_name = step.get("step", f"Step {j+1}")
+                        step_status = step.get("status", "unknown")
+                        step_details = step.get("details", "")
+
+                        step_icon = {"completed": "✅", "failed": "❌", "in_progress": "⏳", "skipped": "⏭️"}.get(step_status, "⚪")
+                        step_line = f"  {j+1}. {step_icon} **{step_name}**"
+                        if step_details:
+                            step_line += f"\n     - {step_details}"
+                        st.markdown(step_line)
+                    else:
+                        st.markdown(f"  {j+1}. {step}")
+
+            # Original Test Steps (if no executed steps available)
+            original_steps = get_result_attr(result, "steps", [])
+            if original_steps and not steps_executed:
+                st.markdown("---")
+                st.markdown("**Test Steps:**")
+                for j, step in enumerate(original_steps):
+                    st.markdown(f"  {j+1}. {step}")
+
+            # Error message
             error_msg = get_result_attr(result, "error_message")
             if error_msg:
-                st.error(f"Error: {error_msg}")
-
-            actual = get_result_attr(result, "actual_result")
-            if actual:
-                st.markdown("**Actual Result:**")
-                st.code(actual)
+                st.markdown("---")
+                st.error(f"**Error:** {error_msg}")
 
 
 def _create_empty_result() -> dict[str, Any]:

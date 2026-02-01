@@ -85,6 +85,15 @@ class TestResult(BaseModel):
     duration_ms: int = 0
     timestamp: datetime = Field(default_factory=datetime.now)
 
+    # Additional fields for detailed reporting
+    test_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    priority: Optional[str] = None
+    steps: list[str] = Field(default_factory=list)
+    steps_executed: list[dict[str, Any]] = Field(default_factory=list)  # [{step, status, details}]
+    expected_result: Optional[str] = None
+
 
 class ReportFormat(str, Enum):
     """Supported report output formats."""
