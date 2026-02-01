@@ -49,6 +49,18 @@ def route_next_agent(state: QRavensState) -> AgentName | str:
     if next_agent:
         return next_agent
 
+    # Handle WAITING_FOR_USER phase - user input has been processed
+    # Route to orchestrator to handle the approval response
+    if phase == WorkflowPhase.WAITING_FOR_USER.value:
+        # If we have an approval response, go to orchestrator to process it
+        if state.get("approval_response"):
+            return "orchestrator"
+        # If we have user_input but it hasn't been processed yet, go to human
+        if state.get("user_input"):
+            return "human"
+        # Otherwise, still waiting - go to orchestrator to re-assert wait
+        return "orchestrator"
+
     # Default routing based on phase
     phase_routing = {
         WorkflowPhase.INIT.value: "orchestrator",

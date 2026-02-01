@@ -210,6 +210,57 @@ Do you approve executing these tests? (yes/no)"""
                 "current_agent": self.name,
             }
 
+        # Handle waiting for user input - re-assert the wait state
+        if phase == WorkflowPhase.WAITING_FOR_USER.value:
+            # Check if we still need user input
+            if state.get("requires_user_input"):
+                # Re-assert the waiting state - don't progress
+                return {
+                    "phase": WorkflowPhase.WAITING_FOR_USER.value,
+                    "requires_user_input": True,
+                    "user_input_prompt": state.get("user_input_prompt", "Awaiting user input..."),
+                    "iteration_count": iteration,
+                    "current_agent": self.name,
+                }
+            # User input has been processed, check for approval response
+            approval_response = state.get("approval_response")
+            if approval_response:
+                if approval_response.get("approved", False):
+                    # User approved - proceed to execution
+                    test_cases = state.get("test_cases", [])
+                    high_priority = sum(1 for tc in test_cases if tc.priority == "high")
+                    medium_priority = sum(1 for tc in test_cases if tc.priority == "medium")
+                    message = AIMessage(
+                        content=f"Test design approved!\n"
+                        f"- Total test cases: {len(test_cases)}\n"
+                        f"- High priority: {high_priority}\n"
+                        f"- Medium priority: {medium_priority}\n\n"
+                        f"Proceeding to execute tests..."
+                    )
+                    return {
+                        "phase": WorkflowPhase.EXECUTING.value,
+                        "next_agent": "executor",
+                        "messages": [message],
+                        "iteration_count": iteration,
+                        "current_agent": self.name,
+                        "approval_response": None,  # Clear the response
+                    }
+                else:
+                    # User rejected - complete workflow
+                    test_cases = state.get("test_cases", [])
+                    message = AIMessage(
+                        content="Test execution cancelled by user.\n"
+                        f"Analysis and {len(test_cases)} designed test cases are available for review."
+                    )
+                    return {
+                        "phase": WorkflowPhase.COMPLETED.value,
+                        "next_agent": None,
+                        "messages": [message],
+                        "iteration_count": iteration,
+                        "current_agent": self.name,
+                        "approval_response": None,  # Clear the response
+                    }
+
         # After reporting is complete
         report = state.get("report")
         if phase == WorkflowPhase.REPORTING.value and report:
