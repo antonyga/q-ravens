@@ -222,8 +222,19 @@ Do you approve executing these tests? (yes/no)"""
                     "iteration_count": iteration,
                     "current_agent": self.name,
                 }
-            # User input has been processed, check for approval response
+
+            # Check for approval response (processed by human_node)
             approval_response = state.get("approval_response")
+
+            # If no approval_response but we have user_input, process it directly
+            # This handles the case where resume bypassed the human_node
+            if not approval_response:
+                user_input = state.get("user_input")
+                if user_input:
+                    # Process the user input directly (same logic as human_node)
+                    approved = user_input.lower() in ["y", "yes", "approve", "ok", "continue"]
+                    approval_response = {"approved": approved, "feedback": None if approved else user_input}
+
             if approval_response:
                 if approval_response.get("approved", False):
                     # User approved - proceed to execution
@@ -244,6 +255,7 @@ Do you approve executing these tests? (yes/no)"""
                         "iteration_count": iteration,
                         "current_agent": self.name,
                         "approval_response": None,  # Clear the response
+                        "user_input": None,  # Clear the user input
                     }
                 else:
                     # User rejected - complete workflow
@@ -259,6 +271,7 @@ Do you approve executing these tests? (yes/no)"""
                         "iteration_count": iteration,
                         "current_agent": self.name,
                         "approval_response": None,  # Clear the response
+                        "user_input": None,  # Clear the user input
                     }
 
         # After reporting is complete

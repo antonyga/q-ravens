@@ -360,22 +360,34 @@ def render_progress_timeline(workflow_state: dict[str, Any]) -> None:
                 )
 
 
-def render_test_results(test_results: list[dict]) -> None:
+def render_test_results(test_results: list) -> None:
     """
     Render test results in an organized view.
 
     Args:
-        test_results: List of test result dictionaries
+        test_results: List of test results (TestResult objects or dictionaries)
     """
     if not test_results:
         st.info("No test results available yet.")
         return
 
+    def get_result_attr(result, attr, default=None):
+        """Helper to get attribute from either dict or Pydantic object."""
+        if hasattr(result, attr):
+            value = getattr(result, attr)
+            # Handle Enum values (like TestStatus)
+            if hasattr(value, 'value'):
+                return value.value
+            return value
+        elif isinstance(result, dict):
+            return result.get(attr, default)
+        return default
+
     # Summary metrics
     total = len(test_results)
-    passed = sum(1 for r in test_results if r.get("status") == "passed")
-    failed = sum(1 for r in test_results if r.get("status") == "failed")
-    skipped = sum(1 for r in test_results if r.get("status") == "skipped")
+    passed = sum(1 for r in test_results if get_result_attr(r, "status") == "passed")
+    failed = sum(1 for r in test_results if get_result_attr(r, "status") == "failed")
+    skipped = sum(1 for r in test_results if get_result_attr(r, "status") == "skipped")
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Tests", total)
@@ -387,22 +399,25 @@ def render_test_results(test_results: list[dict]) -> None:
 
     # Detailed results
     for i, result in enumerate(test_results):
-        status = result.get("status", "unknown")
+        status = get_result_attr(result, "status", "unknown")
         status_icon = {"passed": "✅", "failed": "❌", "skipped": "⏭️"}.get(status, "❓")
+        test_name = get_result_attr(result, "test_id") or get_result_attr(result, "test_name") or f"Test {i+1}"
 
-        with st.expander(f"{status_icon} {result.get('test_name', f'Test {i+1}')}"):
-            st.markdown(f"**Status:** {status.upper()}")
-            st.markdown(f"**Category:** {result.get('category', 'N/A')}")
+        with st.expander(f"{status_icon} {test_name}"):
+            st.markdown(f"**Status:** {status.upper() if status else 'UNKNOWN'}")
 
-            if result.get("description"):
-                st.markdown(f"**Description:** {result.get('description')}")
+            duration = get_result_attr(result, "duration_ms", 0)
+            if duration:
+                st.markdown(f"**Duration:** {duration}ms")
 
-            if result.get("error_message"):
-                st.error(f"Error: {result.get('error_message')}")
+            error_msg = get_result_attr(result, "error_message")
+            if error_msg:
+                st.error(f"Error: {error_msg}")
 
-            if result.get("actual_result"):
+            actual = get_result_attr(result, "actual_result")
+            if actual:
                 st.markdown("**Actual Result:**")
-                st.code(result.get("actual_result"))
+                st.code(actual)
 
 
 def _create_empty_result() -> dict[str, Any]:

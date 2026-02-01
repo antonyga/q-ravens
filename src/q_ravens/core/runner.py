@@ -349,45 +349,25 @@ class QRavensRunner:
                 details={"session_id": self.session_id},
             )
 
-        # If user input provided, update the checkpoint state
+        # Get the current state values from checkpoint
+        current_state = dict(state.values)
+
+        # If user input provided, merge it into the state
         if user_input:
-            state_updates = {
-                "user_input": user_input,
-                "requires_user_input": False,
-            }
-            try:
-                # Update the checkpoint state with user input
-                await graph.aupdate_state(config, state_updates)
-                logger.info(f"Updated checkpoint state with user input")
-            except Exception as e:
-                logger.warning(f"Failed to update state via aupdate_state: {e}, falling back to direct state passing")
-                # Fallback approach
-                current_state = dict(state.values)
-                current_state.update(state_updates)
-                final_state = None
-                try:
-                    async for s in graph.astream(current_state, config, stream_mode="values"):
-                        if s and isinstance(s, dict):
-                            final_state = s
-                except Exception as stream_error:
-                    logger.error(f"Failed to resume workflow: {stream_error}")
-                    raise WorkflowError(
-                        f"Failed to resume workflow: {stream_error}",
-                        details={"session_id": self.session_id},
-                    ) from stream_error
+            current_state["user_input"] = user_input
+            current_state["requires_user_input"] = False
+            logger.info(f"Merged user input into state")
 
-                if final_state is None:
-                    raise WorkflowStateError(
-                        "Resumed workflow completed without producing final state",
-                        details={"session_id": self.session_id},
-                    )
-                logger.info(f"Resumed workflow completed with phase: {final_state.get('phase')}")
-                return final_state
+        # LangGraph ignores input when there's a checkpoint, so we need to start fresh
+        # Use a new thread_id to start a new execution with the merged state
+        from uuid import uuid4
+        resume_thread_id = f"{self.session_id}_resume_{uuid4().hex[:8]}"
+        resume_config = {"configurable": {"thread_id": resume_thread_id}}
 
-        # Resume the workflow using None to resume from checkpoint
+        # Resume the workflow by passing the merged state with a fresh thread_id
         final_state = None
         try:
-            async for s in graph.astream(None, config, stream_mode="values"):
+            async for s in graph.astream(current_state, resume_config, stream_mode="values"):
                 if s and isinstance(s, dict):
                     final_state = s
         except Exception as e:
@@ -449,43 +429,25 @@ class QRavensRunner:
                 details={"session_id": self.session_id},
             )
 
-        # If user input provided, update the checkpoint state
-        if user_input:
-            state_updates = {
-                "user_input": user_input,
-                "requires_user_input": False,
-            }
-            try:
-                # Update the checkpoint state with user input
-                # This properly updates the state and allows resumption from the correct node
-                await graph.aupdate_state(config, state_updates)
-                logger.info(f"Updated checkpoint state with user input")
-            except Exception as e:
-                logger.warning(f"Failed to update state via aupdate_state: {e}, falling back to direct state passing")
-                # Fallback: merge updates into current state for direct passing
-                current_state = dict(state.values)
-                current_state.update(state_updates)
-                # Use the fallback approach
-                try:
-                    async for s in graph.astream(current_state, config, stream_mode="values"):
-                        if s and isinstance(s, dict):
-                            yield s
-                except Exception as stream_error:
-                    logger.error(f"Failed to stream resumed workflow: {stream_error}")
-                    yield {
-                        "phase": WorkflowPhase.ERROR.value,
-                        "error_message": str(stream_error),
-                        "errors": [{"error_type": type(stream_error).__name__, "message": str(stream_error)}],
-                    }
-                    raise WorkflowError(
-                        f"Failed to stream resumed workflow: {stream_error}",
-                        details={"session_id": self.session_id},
-                    ) from stream_error
-                return
+        # Get the current state values from checkpoint
+        current_state = dict(state.values)
 
-        # Stream the resumed workflow using None to resume from checkpoint
+        # If user input provided, merge it into the state
+        if user_input:
+            current_state["user_input"] = user_input
+            current_state["requires_user_input"] = False
+            logger.info(f"Merged user input into state: user_input={user_input}")
+
+        # LangGraph ignores input when there's a checkpoint, so we need to start fresh
+        # Use a new thread_id to start a new execution with the merged state
+        from uuid import uuid4
+        resume_thread_id = f"{self.session_id}_resume_{uuid4().hex[:8]}"
+        resume_config = {"configurable": {"thread_id": resume_thread_id}}
+        logger.debug(f"Starting fresh execution with thread_id: {resume_thread_id}")
+
+        # Stream the workflow with the merged state
         try:
-            async for s in graph.astream(None, config, stream_mode="values"):
+            async for s in graph.astream(current_state, resume_config, stream_mode="values"):
                 if s and isinstance(s, dict):
                     yield s
         except Exception as e:

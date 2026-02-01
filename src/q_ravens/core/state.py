@@ -174,8 +174,13 @@ class QRavensState(TypedDict, total=False):
 
     # Error Handling
     errors: list[str]
+
+    # Human-in-the-loop
     requires_user_input: bool
     user_input_prompt: str
+    user_input: str  # The actual user input value
+    approval_request: dict  # Request details for approval
+    approval_response: dict  # User's response to approval request
 
     # Metadata
     session_id: str
