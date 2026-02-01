@@ -483,5 +483,60 @@ def resume(
         raise typer.Exit(1)
 
 
+@app.command()
+def ui(
+    port: int = typer.Option(8501, "--port", "-p", help="Port to run the UI on"),
+    host: str = typer.Option("localhost", "--host", "-h", help="Host to bind to"),
+) -> None:
+    """Launch the Streamlit chat UI."""
+    import subprocess
+    import sys
+
+    console.print(
+        Panel(
+            f"[bold]Starting Q-Ravens Chat UI[/bold]\n\n"
+            f"URL: http://{host}:{port}\n\n"
+            f"[dim]Press Ctrl+C to stop[/dim]",
+            title="[bold blue]Q-Ravens UI[/bold blue]",
+        )
+    )
+
+    try:
+        # Get the path to the chat module
+        from q_ravens.ui import chat
+        import os
+
+        chat_path = os.path.abspath(chat.__file__)
+
+        # Launch Streamlit
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                chat_path,
+                "--server.port",
+                str(port),
+                "--server.address",
+                host,
+                "--browser.gatherUsageStats",
+                "false",
+            ],
+            check=True,
+        )
+    except ModuleNotFoundError:
+        console.print(
+            "[red]Streamlit is not installed.[/red]\n\n"
+            "Install it with: pip install q-ravens[ui]"
+        )
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down UI...[/yellow]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to start UI: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

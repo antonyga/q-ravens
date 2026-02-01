@@ -40,7 +40,11 @@ src/q_ravens/
 │   ├── vision.py       # Vision/image processing
 │   └── actions.py      # Action primitives
 ├── cli.py              # CLI interface (typer)
-└── ui/                 # UI components (future)
+└── ui/                 # Streamlit chat interface (Phase 3)
+    ├── __init__.py     # UI module exports
+    ├── chat.py         # Main Streamlit chat application
+    ├── components.py   # Reusable UI components
+    └── settings.py     # UI configuration and settings
 ```
 
 ## Code Conventions
@@ -561,6 +565,80 @@ async def get_resource(self):
         yield resource
     finally:
         await resource.cleanup()
+```
+
+## Chat UI (Streamlit)
+
+The Q-Ravens Chat UI provides a conversational interface for running QA tests.
+
+### Running the UI
+
+```bash
+# Install UI dependencies
+pip install q-ravens[ui]
+
+# Launch the UI
+q-ravens ui
+
+# Or with custom port/host
+q-ravens ui --port 8080 --host 0.0.0.0
+```
+
+### UI Structure
+
+| File | Purpose |
+|------|---------|
+| [chat.py](src/q_ravens/ui/chat.py) | Main Streamlit application |
+| [components.py](src/q_ravens/ui/components.py) | Reusable UI components |
+| [settings.py](src/q_ravens/ui/settings.py) | UI configuration and settings |
+
+### UI Features
+
+- **Chat Interface**: Natural language test requests
+- **Progress Timeline**: Visual workflow progress indicator
+- **Agent Status Cards**: Real-time agent activity display
+- **Test Results Tab**: Organized test result display with pass/fail metrics
+- **Report Tab**: Full test report with executive summary
+- **Human-in-the-Loop**: Approval gates for test execution
+- **Session Management**: New session/export functionality
+
+### UI Components Usage
+
+```python
+from q_ravens.ui.components import (
+    render_agent_card,
+    render_test_result_card,
+    render_progress_bar,
+    apply_custom_css,
+)
+
+# Render an agent status card
+render_agent_card("executor", is_active=True)
+
+# Render a test result
+render_test_result_card(
+    test_name="Login Test",
+    status="passed",
+    category="Smoke Test",
+    description="Verify user can login",
+)
+
+# Render a progress bar
+render_progress_bar(current=5, total=10, label="Tests Completed")
+```
+
+### UI Settings
+
+```python
+from q_ravens.ui.settings import UISettings, TestScope
+
+settings = UISettings(
+    theme=Theme.DARK,
+    default_test_scopes=[TestScope.SMOKE, TestScope.FUNCTIONAL],
+    max_iterations=10,
+    persist_state=True,
+    require_human_approval=True,
+)
 ```
 
 ## PRD Reference

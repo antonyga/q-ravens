@@ -38,6 +38,11 @@ from q_ravens.core.visual_reasoning import (
     GoalDecomposition,
     analyze_page_and_decide,
 )
+from q_ravens.core.asyncio_compat import (
+    configure_event_loop,
+    run_async,
+    run_in_thread,
+)
 
 __all__ = [
     # Config
@@ -75,4 +80,8 @@ __all__ = [
     "ReasoningConfidence",
     "GoalDecomposition",
     "analyze_page_and_decide",
+    # Asyncio Compatibility
+    "configure_event_loop",
+    "run_async",
+    "run_in_thread",
 ]
