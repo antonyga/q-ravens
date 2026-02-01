@@ -41,49 +41,47 @@ class DesignerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return """You are the Designer agent of Q-Ravens, a Test Architect specialist.
-Your role is to create comprehensive test strategies and detailed test cases based on analysis results.
+Your role is to create test cases that DIRECTLY address the user's specific testing request.
 
-Your responsibilities:
-1. Generate test scenarios from the analysis data
-2. Design test cases covering functional, accessibility, and edge cases
-3. Prioritize tests by risk and business impact
-4. Create BDD-style specifications when appropriate
-5. Design test data requirements
-6. Identify cross-browser and device coverage needs
-
-When designing tests, consider:
-- Happy path scenarios (main user flows)
-- Negative test cases (error handling, invalid inputs)
-- Edge cases (boundary values, special characters)
-- Accessibility concerns (WCAG compliance areas)
-- Performance-sensitive areas
+CRITICAL RULES:
+1. ONLY generate test cases that are directly relevant to the user's instruction
+2. DO NOT generate generic tests (page load, broken images, accessibility, performance) unless explicitly requested
+3. Focus on EXACTLY what the user asked for - nothing more, nothing less
+4. If the user asks to verify a specific item exists, create a test ONLY for that verification
+5. Be precise and targeted - quality over quantity
 
 Output Format:
 You MUST respond with a JSON array of test cases. Each test case must have:
 - id: Unique identifier (e.g., "TC-001")
-- name: Short descriptive name
-- description: What the test validates
-- steps: Array of step descriptions
-- expected_result: What success looks like
-- priority: "high", "medium", or "low"
+- name: Short descriptive name that reflects the user's request
+- description: What the test validates (should match user's intent)
+- steps: Array of specific step descriptions to accomplish the user's goal
+- expected_result: What success looks like based on user's requirement
+- priority: "high" (since it's what the user specifically asked for)
 - category: "functional", "accessibility", "performance", "security", or "edge_case"
 
-Example:
+Example - If user asks "Verify 'Tequila Ocho Blanco' is on the Menu page":
 ```json
 [
   {
     "id": "TC-001",
-    "name": "Homepage loads successfully",
-    "description": "Verify the homepage loads and displays expected content",
-    "steps": ["Navigate to homepage URL", "Wait for page to load completely"],
-    "expected_result": "Page loads with status 200, title is visible",
+    "name": "Verify 'Tequila Ocho Blanco' on Menu Page",
+    "description": "Verify that the item 'Tequila Ocho Blanco' is present and visible on the Menu page",
+    "steps": [
+      "Navigate to the website homepage",
+      "Find and click on the Menu link/section",
+      "Wait for Menu page to load",
+      "Search for 'Tequila Ocho Blanco' text on the page",
+      "Verify the item is visible"
+    ],
+    "expected_result": "'Tequila Ocho Blanco' is found and visible on the Menu page",
     "priority": "high",
     "category": "functional"
   }
 ]
 ```
 
-Be thorough but practical. Focus on tests that provide the most value."""
+IMPORTANT: Generate ONLY tests that fulfill the user's specific request. Do not add extra generic tests."""
 
     async def process(self, state: QRavensState) -> dict[str, Any]:
         """
@@ -142,21 +140,29 @@ Be thorough but practical. Focus on tests that provide the most value."""
         # Build context from analysis
         context = self._build_analysis_context(analysis)
 
-        # Create the prompt for test design
-        prompt = f"""Based on the following website analysis, design comprehensive test cases.
+        # Create the prompt for test design - FOCUSED on user's specific request
+        prompt = f"""You are designing test cases for a specific user request.
 
-User's Testing Goal: {user_request or "General comprehensive testing"}
+CRITICAL: Generate ONLY test cases that DIRECTLY address the user's request below.
+DO NOT generate generic tests like "page load", "broken images", "accessibility", or "performance" unless the user specifically asked for them.
 
+User's Specific Request: "{user_request}"
+
+Website Analysis Context:
 {context}
 
-Design test cases that cover:
-1. Core functionality tests (page loads, navigation, forms)
-2. Input validation tests (if forms/inputs exist)
-3. Link verification tests (if links exist)
-4. Edge cases and negative scenarios
-5. Accessibility basics (if applicable)
+Based on the user's request above, create test cases that:
+1. DIRECTLY verify what the user asked for
+2. Include specific steps to accomplish the user's goal
+3. Focus ONLY on the user's requirement - nothing extra
 
-Respond with ONLY a JSON array of test cases, no additional text."""
+If the user asks to verify something exists on a page, create a test that:
+- Navigates to the correct page
+- Searches for the specific item/element
+- Verifies its presence
+
+Respond with ONLY a JSON array of test cases that fulfill the user's specific request.
+Do NOT add generic tests that the user did not ask for."""
 
         # Get LLM response
         response = await self.invoke_llm(prompt)
@@ -164,9 +170,9 @@ Respond with ONLY a JSON array of test cases, no additional text."""
         # Parse the test cases from response
         test_cases = self._parse_test_cases(response)
 
-        # If LLM parsing fails, generate basic tests programmatically
+        # If LLM parsing fails, generate targeted fallback tests based on user request
         if not test_cases:
-            test_cases = self._generate_fallback_tests(analysis)
+            test_cases = self._generate_fallback_tests(analysis, user_request)
 
         return test_cases
 
@@ -245,184 +251,190 @@ Respond with ONLY a JSON array of test cases, no additional text."""
 
         return test_cases
 
-    def _generate_fallback_tests(self, analysis: AnalysisResult) -> list[TestCase]:
-        """Generate basic tests programmatically when LLM parsing fails."""
+    def _generate_fallback_tests(self, analysis: AnalysisResult, user_request: str = "") -> list[TestCase]:
+        """
+        Generate targeted tests based on user request when LLM parsing fails.
+
+        Only generates tests relevant to the user's specific instruction.
+        """
         test_cases = []
         test_id = 1
+        user_request_lower = user_request.lower() if user_request else ""
 
-        # Basic page load test
-        test_cases.append(TestCase(
-            id=f"TC-{test_id:03d}",
-            name="Homepage Load Test",
-            description=f"Verify {analysis.target_url} loads successfully",
-            steps=[
-                f"Navigate to {analysis.target_url}",
-                "Wait for page to fully load",
-                "Verify HTTP status is successful (2xx)",
-            ],
-            expected_result="Page loads with status 200, no JavaScript errors",
-            priority="high",
-            category="functional",
-            status=TestStatus.PENDING,
-        ))
-        test_id += 1
+        # Parse user request to understand what they want
+        # Check for specific item verification requests
+        import re
+        item_match = re.search(r"['\"]([^'\"]+)['\"]", user_request)
+        search_item = item_match.group(1) if item_match else None
 
-        # Title verification test
-        for page in analysis.pages_discovered[:3]:
-            if page.title:
-                test_cases.append(TestCase(
-                    id=f"TC-{test_id:03d}",
-                    name=f"Title Verification - {page.title[:30]}",
-                    description=f"Verify page title is present and correct",
-                    steps=[
-                        f"Navigate to {page.url}",
-                        "Get page title",
-                        f"Verify title contains expected text",
-                    ],
-                    expected_result=f"Page title matches: {page.title}",
-                    priority="medium",
-                    category="functional",
-                    status=TestStatus.PENDING,
-                ))
-                test_id += 1
+        # Determine the target page from user request
+        target_page = None
+        if "menu" in user_request_lower:
+            target_page = "Menu"
+        elif "about" in user_request_lower:
+            target_page = "About"
+        elif "contact" in user_request_lower:
+            target_page = "Contact"
+        elif "home" in user_request_lower:
+            target_page = "Home"
 
-        # Link tests
-        for page in analysis.pages_discovered:
-            if page.links:
-                test_cases.append(TestCase(
-                    id=f"TC-{test_id:03d}",
-                    name=f"Link Validation - {page.url[:40]}",
-                    description=f"Verify all links on page are valid",
-                    steps=[
-                        f"Navigate to {page.url}",
-                        f"Find all {len(page.links)} links",
-                        "Verify links have valid href attributes",
-                    ],
-                    expected_result="All links have valid href values",
-                    priority="medium",
-                    category="functional",
-                    status=TestStatus.PENDING,
-                ))
-                test_id += 1
-                break  # Only one link test
+        # Check what type of test the user wants
+        wants_verification = any(word in user_request_lower for word in ["verify", "check", "confirm", "test if", "is on", "exists", "present", "find"])
+        wants_performance = any(word in user_request_lower for word in ["performance", "speed", "load time", "web vitals", "lighthouse"])
+        wants_accessibility = any(word in user_request_lower for word in ["accessibility", "wcag", "a11y", "screen reader"])
+        wants_links = any(word in user_request_lower for word in ["links", "broken links", "navigation links"])
+        wants_forms = any(word in user_request_lower for word in ["form", "input", "submit"])
 
-        # Form tests
-        for page in analysis.pages_discovered:
-            if page.forms:
-                test_cases.append(TestCase(
-                    id=f"TC-{test_id:03d}",
-                    name=f"Form Presence Test",
-                    description=f"Verify forms are present and have required elements",
-                    steps=[
-                        f"Navigate to {page.url}",
-                        f"Locate form elements",
-                        "Verify form has action and method attributes",
-                    ],
-                    expected_result="Forms are properly structured with required attributes",
-                    priority="high",
-                    category="functional",
-                    status=TestStatus.PENDING,
-                ))
-                test_id += 1
-                break  # Only one form test
-
-        # Input validation tests
-        for page in analysis.pages_discovered:
-            if page.inputs:
-                # Find text inputs for validation test
-                text_inputs = [i for i in page.inputs if i.get("type") in ["text", "email", "password", None]]
-                if text_inputs:
-                    test_cases.append(TestCase(
-                        id=f"TC-{test_id:03d}",
-                        name="Input Field Presence Test",
-                        description="Verify input fields are present and accessible",
-                        steps=[
-                            f"Navigate to {page.url}",
-                            f"Locate {len(page.inputs)} input fields",
-                            "Verify inputs are visible and enabled",
-                        ],
-                        expected_result="All input fields are present and interactive",
-                        priority="medium",
-                        category="functional",
-                        status=TestStatus.PENDING,
-                    ))
-                    test_id += 1
-                    break
-
-        # Authentication test if detected
-        if analysis.has_authentication:
+        # Generate test based on user's specific request
+        if search_item and target_page:
+            # User wants to verify a specific item on a specific page
             test_cases.append(TestCase(
                 id=f"TC-{test_id:03d}",
-                name="Authentication Flow Presence",
-                description=f"Verify {analysis.auth_type or 'authentication'} flow is present",
+                name=f"Verify '{search_item}' on {target_page} Page",
+                description=f"Verify that '{search_item}' is present and visible on the {target_page} page",
                 steps=[
                     f"Navigate to {analysis.target_url}",
-                    "Look for login/authentication elements",
-                    "Verify authentication UI is accessible",
+                    f"Find and click on the {target_page} link/section",
+                    f"Wait for {target_page} page to load completely",
+                    f"Search for '{search_item}' text on the page",
+                    f"Verify '{search_item}' is visible on the page",
                 ],
-                expected_result="Authentication flow is present and accessible",
+                expected_result=f"'{search_item}' is found and visible on the {target_page} page",
                 priority="high",
                 category="functional",
                 status=TestStatus.PENDING,
             ))
             test_id += 1
 
-        # JavaScript error check
-        test_cases.append(TestCase(
-            id=f"TC-{test_id:03d}",
-            name="JavaScript Console Error Check",
-            description="Verify no JavaScript errors on page load",
-            steps=[
-                f"Navigate to {analysis.target_url}",
-                "Monitor browser console",
-                "Check for JavaScript errors",
-            ],
-            expected_result="No critical JavaScript errors in console",
-            priority="medium",
-            category="functional",
-            status=TestStatus.PENDING,
-        ))
-        test_id += 1
+        elif search_item and wants_verification:
+            # User wants to verify a specific item exists (page not specified)
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name=f"Verify '{search_item}' Exists",
+                description=f"Verify that '{search_item}' is present on the website",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Explore relevant pages to find the item",
+                    f"Search for '{search_item}' text",
+                    f"Verify '{search_item}' is visible",
+                ],
+                expected_result=f"'{search_item}' is found on the website",
+                priority="high",
+                category="functional",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
 
-        # Performance test - Core Web Vitals with Lighthouse
-        test_cases.append(TestCase(
-            id=f"TC-{test_id:03d}",
-            name="Performance - Core Web Vitals",
-            description="Measure Core Web Vitals using Lighthouse audit",
-            steps=[
-                f"Navigate to {analysis.target_url}",
-                "Run Lighthouse performance audit",
-                "Measure LCP (Largest Contentful Paint)",
-                "Measure TBT (Total Blocking Time)",
-                "Measure CLS (Cumulative Layout Shift)",
-                "Measure FCP (First Contentful Paint)",
-            ],
-            expected_result="Core Web Vitals meet 'Good' thresholds: LCP < 2.5s, TBT < 200ms, CLS < 0.1",
-            priority="medium",
-            category="performance",
-            status=TestStatus.PENDING,
-        ))
-        test_id += 1
+        elif target_page and wants_verification:
+            # User wants to verify something about a specific page
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name=f"Verify {target_page} Page",
+                description=f"Verify the {target_page} page loads and displays correctly",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    f"Find and click on the {target_page} link",
+                    f"Wait for {target_page} page to load",
+                    f"Verify {target_page} page content is visible",
+                ],
+                expected_result=f"{target_page} page loads successfully with expected content",
+                priority="high",
+                category="functional",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
 
-        # Accessibility test - WCAG 2.1 AA with axe-core
-        test_cases.append(TestCase(
-            id=f"TC-{test_id:03d}",
-            name="Accessibility - WCAG 2.1 AA Compliance",
-            description="Check WCAG 2.1 Level AA compliance using axe-core",
-            steps=[
-                f"Navigate to {analysis.target_url}",
-                "Inject and run axe-core accessibility audit",
-                "Check for critical accessibility violations",
-                "Check for serious accessibility violations",
-                "Verify color contrast ratios",
-                "Check for missing alt text on images",
-                "Verify form labels and ARIA attributes",
-            ],
-            expected_result="No critical or serious accessibility violations. Compliance >= 90%",
-            priority="high",
-            category="accessibility",
-            status=TestStatus.PENDING,
-        ))
+        elif wants_performance:
+            # User explicitly asked for performance testing
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name="Performance - Core Web Vitals",
+                description="Measure Core Web Vitals using Lighthouse audit",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Run Lighthouse performance audit",
+                    "Measure LCP (Largest Contentful Paint)",
+                    "Measure TBT (Total Blocking Time)",
+                    "Measure CLS (Cumulative Layout Shift)",
+                ],
+                expected_result="Core Web Vitals meet 'Good' thresholds",
+                priority="high",
+                category="performance",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
+
+        elif wants_accessibility:
+            # User explicitly asked for accessibility testing
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name="Accessibility - WCAG Compliance",
+                description="Check WCAG 2.1 Level AA compliance",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Run axe-core accessibility audit",
+                    "Check for accessibility violations",
+                ],
+                expected_result="No critical accessibility violations",
+                priority="high",
+                category="accessibility",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
+
+        elif wants_links:
+            # User explicitly asked for link testing
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name="Link Validation",
+                description="Verify all links on the page are valid",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Find all links on the page",
+                    "Check each link for validity",
+                ],
+                expected_result="All links are valid and working",
+                priority="high",
+                category="functional",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
+
+        elif wants_forms:
+            # User explicitly asked for form testing
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name="Form Functionality Test",
+                description="Verify forms work correctly",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Locate form elements",
+                    "Test form interaction",
+                ],
+                expected_result="Forms are functional and accessible",
+                priority="high",
+                category="functional",
+                status=TestStatus.PENDING,
+            ))
+            test_id += 1
+
+        else:
+            # Generic fallback only if we couldn't understand the request
+            # Create a single test based on the user's request text
+            test_cases.append(TestCase(
+                id=f"TC-{test_id:03d}",
+                name=f"User Request: {user_request[:50]}..." if len(user_request) > 50 else f"User Request: {user_request}",
+                description=f"Execute test based on user instruction: {user_request}",
+                steps=[
+                    f"Navigate to {analysis.target_url}",
+                    "Perform actions as specified in user request",
+                    "Verify expected outcome",
+                ],
+                expected_result="User's testing requirement is satisfied",
+                priority="high",
+                category="functional",
+                status=TestStatus.PENDING,
+            ))
 
         return test_cases
 
