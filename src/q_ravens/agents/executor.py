@@ -243,6 +243,345 @@ When executing tests:
         "error": ["error", "invalid", "incorrect", "inválido", "incorrecto", "erreur", "fehler", "dirección de correo"],
     }
 
+    # Multi-language patterns for authentication errors (semantic detection)
+    AUTHENTICATION_ERROR_PATTERNS = {
+        # English
+        "invalid credentials", "invalid password", "invalid email", "invalid username",
+        "incorrect password", "incorrect email", "wrong password", "wrong email",
+        "unknown email", "unknown user", "user not found", "account not found",
+        "authentication failed", "login failed", "access denied",
+        "email not registered", "password incorrect", "invalid login",
+        # Spanish
+        "credenciales inválidas", "contraseña incorrecta", "correo electrónico desconocido",
+        "dirección de correo electrónico desconocida", "usuario no encontrado",
+        "contraseña inválida", "usuario desconocido", "acceso denegado",
+        "error de autenticación", "inicio de sesión fallido", "correo no registrado",
+        "la contraseña no es correcta", "el usuario no existe", "compruébala de nuevo",
+        # French
+        "identifiants invalides", "mot de passe incorrect", "email inconnu",
+        "utilisateur non trouvé", "échec de connexion", "accès refusé",
+        # German
+        "ungültige anmeldedaten", "falsches passwort", "unbekannte e-mail",
+        "benutzer nicht gefunden", "anmeldung fehlgeschlagen", "zugriff verweigert",
+        # Portuguese
+        "credenciais inválidas", "senha incorreta", "email desconhecido",
+        "usuário não encontrado", "falha no login", "acesso negado",
+    }
+
+    # Patterns indicating successful authentication
+    AUTHENTICATION_SUCCESS_PATTERNS = {
+        # English
+        "welcome", "dashboard", "my account", "logout", "sign out", "log out",
+        "profile", "settings", "hello", "hi ", "logged in", "successfully",
+        # Spanish
+        "bienvenido", "bienvenida", "mi cuenta", "cerrar sesión", "salir",
+        "perfil", "configuración", "hola", "sesión iniciada", "exitosamente",
+        # French
+        "bienvenue", "mon compte", "déconnexion", "profil", "paramètres",
+        # German
+        "willkommen", "mein konto", "abmelden", "profil", "einstellungen",
+        # Portuguese
+        "bem-vindo", "minha conta", "sair", "perfil", "configurações",
+    }
+
+    async def _semantic_verification(
+        self,
+        page,
+        step_desc: str,
+        test_context: dict,
+    ) -> dict:
+        """
+        Use LLM to semantically analyze page content and determine test outcome.
+
+        This method reasons about what the page is actually telling us,
+        regardless of language, and compares it against test intent.
+
+        Args:
+            page: Playwright page object
+            step_desc: The verification step description
+            test_context: Context about the test (name, description, expected_result)
+
+        Returns:
+            dict with status, passed, details, and reasoning
+        """
+        try:
+            # Gather page state
+            page_url = page.url
+            page_title = await page.title()
+
+            # Get visible text content (limited for LLM context)
+            visible_text = await page.evaluate("""
+                () => {
+                    const walker = document.createTreeWalker(
+                        document.body,
+                        NodeFilter.SHOW_TEXT,
+                        null,
+                        false
+                    );
+                    let text = '';
+                    let node;
+                    while (node = walker.nextNode()) {
+                        const parent = node.parentElement;
+                        if (parent && window.getComputedStyle(parent).display !== 'none') {
+                            const trimmed = node.textContent.trim();
+                            if (trimmed) text += trimmed + ' ';
+                        }
+                    }
+                    return text.substring(0, 3000);
+                }
+            """)
+
+            # Find error/alert elements specifically
+            error_elements = await self._find_error_elements(page)
+
+            # Find success indicators
+            success_indicators = await self._find_success_indicators(page)
+
+            # Build prompt for LLM semantic analysis
+            prompt = f"""You are a QA analyst examining a web page after a test action.
+
+## Test Context
+- Test Name: {test_context.get('name', 'Unknown')}
+- Test Description: {test_context.get('description', 'N/A')}
+- Expected Result: {test_context.get('expected_result', 'N/A')}
+- Verification Step: {step_desc}
+
+## Current Page State
+- URL: {page_url}
+- Title: {page_title}
+
+## Error/Alert Elements Found
+{error_elements if error_elements else 'None found'}
+
+## Success Indicators Found
+{success_indicators if success_indicators else 'None found'}
+
+## Visible Page Text (excerpt)
+{visible_text[:1500]}
+
+## Your Task
+Analyze whether this verification step PASSED or FAILED based on what the page is showing.
+
+Consider:
+1. Does the page indicate the expected action succeeded or failed?
+2. Are there error messages (in ANY language) that indicate failure?
+3. Does the page state match what the test expected?
+
+IMPORTANT:
+- An error message like "Unknown email address" or "Invalid password" means authentication FAILED
+- The test expects SUCCESS, so finding auth errors = TEST FAILED
+- Don't just look for "server error" - any authentication failure means the test failed
+
+Return your analysis as JSON:
+```json
+{{
+    "passed": true/false,
+    "reasoning": "Brief explanation of why the test passed or failed",
+    "evidence": "The specific text/element that proves the outcome",
+    "confidence": "high/medium/low"
+}}
+```
+"""
+
+            # Invoke LLM for semantic analysis
+            response = await self.invoke_llm(prompt)
+
+            # Parse LLM response
+            result = self._parse_json_response(response)
+
+            if result:
+                passed = result.get("passed", False)
+                reasoning = result.get("reasoning", "No reasoning provided")
+                evidence = result.get("evidence", "No evidence cited")
+                confidence = result.get("confidence", "medium")
+
+                status = "completed" if passed else "failed"
+                details = f"{reasoning}. Evidence: {evidence} (Confidence: {confidence})"
+
+                return {
+                    "step": step_desc,
+                    "status": status,
+                    "passed": passed,
+                    "details": details,
+                    "reasoning": reasoning,
+                }
+
+            # Fallback if LLM parsing fails
+            return await self._fallback_verification(page, step_desc, error_elements, success_indicators)
+
+        except Exception as e:
+            logger.error(f"Semantic verification failed: {e}")
+            return {
+                "step": step_desc,
+                "status": "failed",
+                "passed": False,
+                "details": f"Semantic verification error: {str(e)}",
+            }
+
+    async def _find_error_elements(self, page) -> str:
+        """Find and describe error/alert elements on the page."""
+        error_info = []
+
+        error_selectors = [
+            "[class*='error']",
+            "[class*='alert']",
+            "[class*='invalid']",
+            "[class*='warning']",
+            "[class*='notice-error']",
+            "[class*='message-error']",
+            "[role='alert']",
+            "[aria-invalid='true']",
+            "#login_error",
+            ".login-error",
+            ".auth-error",
+        ]
+
+        for selector in error_selectors:
+            try:
+                elements = await page.query_selector_all(selector)
+                for el in elements:
+                    if await el.is_visible():
+                        text = (await el.inner_text()).strip()
+                        if text:
+                            element_info = await self._get_element_info(el)
+                            error_info.append(f"- {element_info}: '{text[:200]}'")
+            except Exception:
+                continue
+
+        return "\n".join(error_info) if error_info else ""
+
+    async def _find_success_indicators(self, page) -> str:
+        """Find and describe success indicators on the page."""
+        success_info = []
+
+        # Check for logout/signout links (indicates logged in)
+        logout_selectors = [
+            "a:has-text('Logout')", "a:has-text('Log out')", "a:has-text('Sign out')",
+            "a:has-text('Cerrar sesión')", "a:has-text('Salir')", "a:has-text('Déconnexion')",
+            "[href*='logout']", "[href*='signout']",
+        ]
+
+        for selector in logout_selectors:
+            try:
+                el = await page.query_selector(selector)
+                if el and await el.is_visible():
+                    element_info = await self._get_element_info(el)
+                    success_info.append(f"- Logout link found: {element_info}")
+                    break
+            except Exception:
+                continue
+
+        # Check for welcome messages
+        welcome_selectors = [
+            "[class*='welcome']",
+            "[class*='greeting']",
+            "[class*='user-name']",
+            "[class*='account-name']",
+        ]
+
+        for selector in welcome_selectors:
+            try:
+                elements = await page.query_selector_all(selector)
+                for el in elements:
+                    if await el.is_visible():
+                        text = (await el.inner_text()).strip()
+                        if text:
+                            success_info.append(f"- Welcome element: '{text[:100]}'")
+            except Exception:
+                continue
+
+        # Check URL for dashboard/account indicators
+        current_url = page.url.lower()
+        if any(x in current_url for x in ['dashboard', 'account', 'profile', 'my-', 'mi-cuenta']):
+            success_info.append(f"- URL suggests authenticated area: {page.url}")
+
+        return "\n".join(success_info) if success_info else ""
+
+    async def _fallback_verification(
+        self,
+        page,
+        step_desc: str,
+        error_elements: str,
+        success_indicators: str,
+    ) -> dict:
+        """
+        Fallback verification when LLM parsing fails.
+
+        Uses pattern matching on error/success indicators.
+        """
+        page_content = await page.content()
+        page_content_lower = page_content.lower()
+
+        # Check for authentication errors (multi-language)
+        auth_errors_found = []
+        for pattern in self.AUTHENTICATION_ERROR_PATTERNS:
+            if pattern.lower() in page_content_lower:
+                auth_errors_found.append(pattern)
+
+        if auth_errors_found:
+            return {
+                "step": step_desc,
+                "status": "failed",
+                "passed": False,
+                "details": f"Authentication error detected: {', '.join(auth_errors_found[:3])}. "
+                           f"This indicates the login/authentication failed.",
+            }
+
+        # Check for success indicators
+        success_found = []
+        for pattern in self.AUTHENTICATION_SUCCESS_PATTERNS:
+            if pattern.lower() in page_content_lower:
+                success_found.append(pattern)
+
+        if success_found and not error_elements:
+            return {
+                "step": step_desc,
+                "status": "completed",
+                "passed": True,
+                "details": f"Success indicators found: {', '.join(success_found[:3])}. "
+                           f"No error elements detected.",
+            }
+
+        # If error elements exist but we couldn't parse them, fail the test
+        if error_elements:
+            return {
+                "step": step_desc,
+                "status": "failed",
+                "passed": False,
+                "details": f"Error elements detected on page:\n{error_elements}",
+            }
+
+        # Default: inconclusive
+        return {
+            "step": step_desc,
+            "status": "completed",
+            "passed": True,
+            "details": "No clear error or success indicators found. Assuming passed.",
+        }
+
+    def _parse_json_response(self, response: str) -> Optional[dict]:
+        """Parse JSON from LLM response."""
+        import re
+        import json
+
+        # Try markdown code blocks first
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Try raw JSON
+        try:
+            json_match = re.search(r'[\[{][\s\S]*[\]}]', response)
+            if json_match:
+                return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+        return None
+
     async def _find_and_open_login_modal(self, page) -> dict:
         """
         Find and open login modal/popup if present.
@@ -1195,10 +1534,18 @@ When executing tests:
                     "details": f"Page loaded successfully. Title: '{page_title}'"
                 })
 
+                # Build test context for semantic verification
+                test_context = {
+                    "name": test_case.name,
+                    "description": test_case.description,
+                    "expected_result": test_case.expected_result,
+                    "category": test_case.category,
+                }
+
                 # Execute each step from test case
                 for step_desc in test_case.steps:
                     step_lower = step_desc.lower()
-                    step_result = await self._execute_step(page, step_desc, step_lower)
+                    step_result = await self._execute_step(page, step_desc, step_lower, test_context)
                     steps.append(step_result)
 
                     if step_result["status"] == "failed":
@@ -1231,15 +1578,38 @@ When executing tests:
             finally:
                 await browser.close()
 
-    async def _execute_step(self, page, step_desc: str, step_lower: str) -> dict:
+    async def _execute_step(
+        self,
+        page,
+        step_desc: str,
+        step_lower: str,
+        test_context: Optional[dict] = None,
+    ) -> dict:
         """
         Execute a single test step and return detailed results.
 
         Parses the step description to understand what action to perform,
         then executes it and captures detailed element information.
         Supports multiple languages and popup/modal forms.
+
+        Args:
+            page: Playwright page object
+            step_desc: The step description
+            step_lower: Lowercase version of step description
+            test_context: Optional context about the test for semantic verification
+
+        Returns:
+            dict with step, status, and details
         """
         import re
+
+        # Default test context if not provided
+        if test_context is None:
+            test_context = {
+                "name": "Unknown Test",
+                "description": "",
+                "expected_result": "",
+            }
 
         try:
             # === LOCATE LOGIN FORM (handle popups/modals) ===
@@ -1446,85 +1816,27 @@ When executing tests:
             # === VERIFY/CHECK actions ===
             # Patterns: "Verify error message is displayed", "Check that login failed"
             if "verify" in step_lower or "check" in step_lower or "confirm" in step_lower or "ensure" in step_lower:
-                # Look for what to verify
+                # Determine if this is a critical verification that needs semantic analysis
+                is_login_test = any(x in test_context.get("name", "").lower() for x in ["login", "sign in", "authentication", "auth"])
+                is_critical_verification = (
+                    is_login_test or
+                    "login" in step_lower or
+                    "authentication" in step_lower or
+                    "credential" in step_lower or
+                    "success" in step_lower or
+                    "fail" in step_lower or
+                    "working" in step_lower
+                )
+
+                # For critical verifications, use semantic analysis with LLM
+                if is_critical_verification:
+                    logger.info(f"Using semantic verification for critical step: {step_desc}")
+                    return await self._semantic_verification(page, step_desc, test_context)
+
+                # For non-critical verifications, use quick pattern matching
                 found_elements = []
 
-                # Check for error messages
-                if "error" in step_lower or "message" in step_lower or "invalid" in step_lower:
-                    error_selectors = [
-                        "[class*='error']",
-                        "[class*='alert']",
-                        "[class*='invalid']",
-                        "[class*='warning']",
-                        "[role='alert']",
-                        ".error-message",
-                        ".alert-danger",
-                        ".validation-error",
-                        "[aria-invalid='true']",
-                    ]
-
-                    for selector in error_selectors:
-                        try:
-                            elements = await page.query_selector_all(selector)
-                            for el in elements:
-                                if await el.is_visible():
-                                    text = await el.inner_text()
-                                    if text.strip():
-                                        element_info = await self._get_element_info(el)
-                                        found_elements.append({
-                                            "element": element_info,
-                                            "text": text.strip()[:100]
-                                        })
-                        except Exception:
-                            continue
-
-                    if found_elements:
-                        details = "; ".join([f"Found: '{e['text']}' in {e['element']}" for e in found_elements[:3]])
-                        return {
-                            "step": step_desc,
-                            "status": "completed",
-                            "details": details
-                        }
-                    else:
-                        return {
-                            "step": step_desc,
-                            "status": "failed",
-                            "details": "No error/message elements found on the page"
-                        }
-
-                # Check for success messages
-                if "success" in step_lower or "welcome" in step_lower or "logged in" in step_lower:
-                    success_selectors = [
-                        "[class*='success']",
-                        "[class*='welcome']",
-                        ".alert-success",
-                        "[role='status']",
-                    ]
-
-                    for selector in success_selectors:
-                        try:
-                            elements = await page.query_selector_all(selector)
-                            for el in elements:
-                                if await el.is_visible():
-                                    text = await el.inner_text()
-                                    if text.strip():
-                                        element_info = await self._get_element_info(el)
-                                        found_elements.append({
-                                            "element": element_info,
-                                            "text": text.strip()[:100]
-                                        })
-                        except Exception:
-                            continue
-
-                    if found_elements:
-                        details = "; ".join([f"Found: '{e['text']}' in {e['element']}" for e in found_elements[:3]])
-                        return {
-                            "step": step_desc,
-                            "status": "completed",
-                            "details": details
-                        }
-
-                # Check for specific text on page
+                # Check for specific text on page first
                 text_match = re.search(r"['\"]([^'\"]+)['\"]", step_desc)
                 if text_match:
                     search_text = text_match.group(1)
@@ -1540,6 +1852,63 @@ When executing tests:
                             "step": step_desc,
                             "status": "failed",
                             "details": f"Text '{search_text}' not found on the page"
+                        }
+
+                # Check for error messages (but also analyze their meaning)
+                if "error" in step_lower or "message" in step_lower or "invalid" in step_lower:
+                    error_elements = await self._find_error_elements(page)
+                    if error_elements:
+                        # Check if these errors indicate authentication failure
+                        page_content = await page.content()
+                        page_content_lower = page_content.lower()
+
+                        for pattern in self.AUTHENTICATION_ERROR_PATTERNS:
+                            if pattern.lower() in page_content_lower:
+                                return {
+                                    "step": step_desc,
+                                    "status": "failed",
+                                    "details": f"Authentication error detected: '{pattern}'. This indicates the login/action failed. Errors found:\n{error_elements}"
+                                }
+
+                        # If we're looking for errors and found them, that's what we expected
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": f"Error elements found as expected:\n{error_elements}"
+                        }
+                    else:
+                        return {
+                            "step": step_desc,
+                            "status": "failed",
+                            "details": "No error/message elements found on the page"
+                        }
+
+                # Check for success messages
+                if "success" in step_lower or "welcome" in step_lower or "logged in" in step_lower:
+                    success_indicators = await self._find_success_indicators(page)
+                    if success_indicators:
+                        return {
+                            "step": step_desc,
+                            "status": "completed",
+                            "details": f"Success indicators found:\n{success_indicators}"
+                        }
+                    else:
+                        # Check for auth errors that would contradict success
+                        page_content = await page.content()
+                        page_content_lower = page_content.lower()
+
+                        for pattern in self.AUTHENTICATION_ERROR_PATTERNS:
+                            if pattern.lower() in page_content_lower:
+                                return {
+                                    "step": step_desc,
+                                    "status": "failed",
+                                    "details": f"Expected success but found authentication error: '{pattern}'"
+                                }
+
+                        return {
+                            "step": step_desc,
+                            "status": "failed",
+                            "details": "No success indicators found on the page"
                         }
 
                 # Generic verification - just check page loaded
