@@ -4,7 +4,9 @@ This document provides code conventions, patterns, and instructions for AI assis
 
 ## Project Overview
 
-Q-Ravens is an autonomous QA agent swarm that uses LangGraph for multi-agent orchestration. It enables comprehensive web application testing through natural language instructions.
+Q-Ravens is an autonomous QA agent swarm that uses LangGraph for multi-agent orchestration. It enables comprehensive web application testing through natural language instructions. The agents use **ReAct patterns** (Reason, Act, Observe, Reflect) and **semantic verification** to understand test outcomes in any language.
+
+**Current Phase:** Phase 2 - Semantic verification, multi-language support
 
 **Key Technologies:**
 - **Agent Framework:** LangGraph 0.2.0+, LangChain 0.3.0+
@@ -454,6 +456,7 @@ Use pytest-asyncio for async tests.
 | File | Purpose |
 |------|---------|
 | [base.py](src/q_ravens/agents/base.py) | BaseAgent with LLM integration and retry logic |
+| [executor.py](src/q_ravens/agents/executor.py) | ExecutorAgent with semantic verification and multi-language support |
 | [state.py](src/q_ravens/core/state.py) | QRavensState TypedDict and Pydantic models |
 | [graph.py](src/q_ravens/core/graph.py) | LangGraph workflow definition |
 | [runner.py](src/q_ravens/core/runner.py) | QRavensRunner entry point |
@@ -528,6 +531,160 @@ for p in priorities[:5]:
 - Serious: Significantly impacts user experience
 - Moderate: Moderately impacts user experience
 - Minor: Minor impact on user experience
+
+## Semantic Verification Pattern
+
+The ExecutorAgent uses **semantic verification** to understand test outcomes beyond literal pattern matching. This is critical for:
+- Multi-language support (detecting errors in any language)
+- Context-aware validation (understanding what the page means, not just what it contains)
+- Proper test failure detection (auth errors = test failed, not "element found")
+
+### When to Use Semantic Verification
+
+Use `_semantic_verification()` for critical verification steps:
+- Login/authentication tests
+- Form submission outcomes
+- Any step where success/failure has semantic meaning
+
+```python
+# In _execute_step, detect critical verifications
+is_login_test = any(x in test_context.get("name", "").lower()
+                    for x in ["login", "sign in", "authentication"])
+is_critical_verification = (
+    is_login_test or
+    "login" in step_lower or
+    "success" in step_lower or
+    "fail" in step_lower
+)
+
+if is_critical_verification:
+    return await self._semantic_verification(page, step_desc, test_context)
+```
+
+### Semantic Verification Implementation
+
+```python
+async def _semantic_verification(
+    self,
+    page,
+    step_desc: str,
+    test_context: dict,
+) -> dict:
+    """
+    Use LLM to semantically analyze page content and determine test outcome.
+    """
+    # 1. Gather page state
+    page_url = page.url
+    page_title = await page.title()
+    visible_text = await page.evaluate("() => document.body.innerText.substring(0, 3000)")
+
+    # 2. Find error/success elements
+    error_elements = await self._find_error_elements(page)
+    success_indicators = await self._find_success_indicators(page)
+
+    # 3. Build LLM prompt with context
+    prompt = f"""You are a QA analyst examining a web page after a test action.
+
+## Test Context
+- Test Name: {test_context.get('name', 'Unknown')}
+- Expected Result: {test_context.get('expected_result', 'N/A')}
+- Verification Step: {step_desc}
+
+## Error Elements Found
+{error_elements if error_elements else 'None found'}
+
+## Success Indicators Found
+{success_indicators if success_indicators else 'None found'}
+
+## Your Task
+Analyze whether this verification step PASSED or FAILED.
+
+IMPORTANT:
+- An error message like "Unknown email address" means authentication FAILED
+- The test expects SUCCESS, so finding auth errors = TEST FAILED
+
+Return as JSON:
+```json
+{{"passed": true/false, "reasoning": "...", "evidence": "..."}}
+```
+"""
+
+    # 4. Invoke LLM and parse response
+    response = await self.invoke_llm(prompt)
+    result = self._parse_json_response(response)
+
+    # 5. Return with proper status
+    if result:
+        passed = result.get("passed", False)
+        status = "completed" if passed else "failed"
+        return {"step": step_desc, "status": status, "details": result.get("reasoning")}
+
+    # 6. Fallback to pattern matching
+    return await self._fallback_verification(page, step_desc, error_elements, success_indicators)
+```
+
+### Multi-Language Authentication Patterns
+
+Define error patterns for multiple languages:
+
+```python
+AUTHENTICATION_ERROR_PATTERNS = {
+    # English
+    "invalid credentials", "invalid password", "wrong password",
+    "unknown email", "user not found", "authentication failed",
+    # Spanish
+    "credenciales inválidas", "contraseña incorrecta",
+    "dirección de correo electrónico desconocida", "usuario no encontrado",
+    # French
+    "identifiants invalides", "mot de passe incorrect",
+    # German
+    "ungültige anmeldedaten", "falsches passwort",
+    # Portuguese
+    "credenciais inválidas", "senha incorreta",
+}
+
+AUTHENTICATION_SUCCESS_PATTERNS = {
+    # English
+    "welcome", "dashboard", "my account", "logout", "sign out",
+    # Spanish
+    "bienvenido", "mi cuenta", "cerrar sesión",
+    # French
+    "bienvenue", "mon compte", "déconnexion",
+    # German
+    "willkommen", "mein konto", "abmelden",
+    # Portuguese
+    "bem-vindo", "minha conta", "sair",
+}
+```
+
+### Fallback Verification
+
+When LLM parsing fails, use pattern matching:
+
+```python
+async def _fallback_verification(self, page, step_desc, error_elements, success_indicators):
+    page_content = await page.content()
+    page_content_lower = page_content.lower()
+
+    # Check for auth errors in any language
+    for pattern in self.AUTHENTICATION_ERROR_PATTERNS:
+        if pattern.lower() in page_content_lower:
+            return {
+                "step": step_desc,
+                "status": "failed",
+                "details": f"Authentication error detected: '{pattern}'"
+            }
+
+    # Check for success indicators
+    if success_indicators and not error_elements:
+        return {"step": step_desc, "status": "completed", "details": "Success indicators found"}
+
+    # If error elements exist, fail the test
+    if error_elements:
+        return {"step": step_desc, "status": "failed", "details": f"Errors found: {error_elements}"}
+
+    return {"step": step_desc, "status": "completed", "details": "No clear indicators"}
+```
 
 ## Common Patterns
 
@@ -650,6 +807,29 @@ Key agents defined in PRD:
 - **Orchestrator** (Project Manager): Central coordinator
 - **Analyzer** (QA Analyst): Website analysis and mapping
 - **Designer** (Test Architect): Test case generation
-- **Executor** (Automation Engineer): Test execution
+- **Executor** (Automation Engineer): Test execution with semantic verification
 - **Reporter** (QA Lead): Report generation
+- **VisualAgent** (See-Think-Act-Reflect): Vision-based UI interaction
 - **DevOps** (Infrastructure): Environment management (Phase 4)
+
+## ExecutorAgent Key Capabilities
+
+The ExecutorAgent is the most complex agent, responsible for:
+
+1. **Test Execution**: Running Playwright-based browser automation
+2. **Semantic Verification**: Using LLM to understand test outcomes
+3. **Multi-Language Support**: Detecting errors in 5+ languages
+4. **Performance Testing**: Core Web Vitals via Lighthouse
+5. **Accessibility Testing**: WCAG 2.1 AA via axe-core
+
+### Key Methods
+
+| Method | Purpose |
+|--------|---------|
+| `_execute_step()` | Execute a single test step with context |
+| `_semantic_verification()` | LLM-powered outcome analysis |
+| `_find_error_elements()` | Locate error/alert elements |
+| `_find_success_indicators()` | Locate success indicators |
+| `_fallback_verification()` | Pattern-based fallback |
+| `_find_input_by_accessibility()` | Multi-language input detection |
+| `_find_submit_button()` | Multi-language button detection |
