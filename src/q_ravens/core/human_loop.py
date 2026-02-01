@@ -180,12 +180,22 @@ async def human_node(state: QRavensState) -> dict[str, Any]:
         # Process the user's response
         approved = user_input.lower() in ["y", "yes", "approve", "ok", "continue"]
 
-        # Get the phase to resume to - use the phase before we started waiting
-        # If we have analysis, resume to ANALYZING so orchestrator can proceed to execution
-        # Otherwise, resume to INIT
+        # Determine the correct phase to resume to based on workflow state
+        # If we have test_cases, we were waiting for approval to execute -> resume to DESIGNING
+        # If we have analysis but no test_cases, resume to ANALYZING
+        # Otherwise resume to INIT
+        has_test_cases = bool(state.get("test_cases"))
         has_analysis = state.get("analysis") is not None
+
         if approved:
-            resume_phase = WorkflowPhase.ANALYZING.value if has_analysis else WorkflowPhase.INIT.value
+            if has_test_cases:
+                # We were waiting for approval after test design -> resume to DESIGNING
+                # so orchestrator can see approval_response and proceed to executor
+                resume_phase = WorkflowPhase.DESIGNING.value
+            elif has_analysis:
+                resume_phase = WorkflowPhase.ANALYZING.value
+            else:
+                resume_phase = WorkflowPhase.INIT.value
         else:
             resume_phase = WorkflowPhase.COMPLETED.value
 

@@ -16,13 +16,14 @@ def configure_event_loop() -> None:
     """
     Configure the event loop for the current platform.
 
-    On Windows, Playwright requires the WindowsSelectorEventLoopPolicy
-    because the default ProactorEventLoop doesn't support subprocess
-    creation in the way Playwright needs.
+    On Windows, subprocess operations require ProactorEventLoop.
+    The SelectorEventLoop does NOT support subprocess creation and raises
+    NotImplementedError when Playwright tries to launch browser processes.
     """
     if sys.platform == "win32":
-        # Windows requires SelectorEventLoop for Playwright subprocess support
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        # Windows requires ProactorEventLoop for subprocess support
+        # SelectorEventLoop raises NotImplementedError for subprocess operations
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 def get_or_create_event_loop() -> asyncio.AbstractEventLoop:

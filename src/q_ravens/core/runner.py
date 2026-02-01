@@ -70,6 +70,9 @@ class QRavensRunner:
         session_id: Optional[str] = None,
         use_safe_nodes: bool = True,
         max_errors: int = 5,
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
     ):
         """
         Initialize the runner.
@@ -79,12 +82,18 @@ class QRavensRunner:
             session_id: Optional session ID for checkpointing
             use_safe_nodes: Whether to wrap agent nodes with error handling
             max_errors: Maximum errors before failing workflow
+            llm_provider: LLM provider to use (e.g., "anthropic", "openai")
+            llm_model: Model name to use
+            llm_api_key: API key for the LLM provider
         """
         self.persist = persist
         self.session_id = session_id or str(uuid4())
         self.checkpoint_manager = CheckpointManager(persist=persist)
         self.use_safe_nodes = use_safe_nodes
         self.max_errors = max_errors
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+        self.llm_api_key = llm_api_key
         self._graph = None
         self._checkpointer = None
 
@@ -181,6 +190,14 @@ class QRavensRunner:
             "test_results": [],
         }
 
+        # Add LLM configuration if provided
+        if self.llm_provider:
+            initial_state["llm_provider"] = self.llm_provider
+        if self.llm_model:
+            initial_state["llm_model"] = self.llm_model
+        if self.llm_api_key:
+            initial_state["llm_api_key"] = self.llm_api_key
+
         # Configuration for the run
         config = {"configurable": {"thread_id": self.session_id}}
 
@@ -262,6 +279,14 @@ class QRavensRunner:
             "test_cases": [],
             "test_results": [],
         }
+
+        # Add LLM configuration if provided
+        if self.llm_provider:
+            initial_state["llm_provider"] = self.llm_provider
+        if self.llm_model:
+            initial_state["llm_model"] = self.llm_model
+        if self.llm_api_key:
+            initial_state["llm_api_key"] = self.llm_api_key
 
         # Configuration for the run
         config = {"configurable": {"thread_id": self.session_id}}
@@ -352,6 +377,74 @@ class QRavensRunner:
 
         logger.info(f"Resumed workflow completed with phase: {final_state.get('phase')}")
         return final_state
+
+    async def stream_resume(
+        self,
+        user_input: Optional[str] = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Stream a resumed workflow, yielding state updates.
+
+        Args:
+            user_input: Optional user input if the workflow was waiting for it
+
+        Yields:
+            State updates as the workflow progresses
+
+        Raises:
+            WorkflowCheckpointError: If no checkpoint found
+            WorkflowError: If workflow fails to resume
+        """
+        logger.info(f"Streaming resumed workflow for session: {self.session_id}")
+
+        try:
+            graph = await self._ensure_graph()
+        except WorkflowCheckpointError:
+            raise
+        except Exception as e:
+            raise WorkflowError(f"Failed to initialize workflow for resume: {e}") from e
+
+        config = {"configurable": {"thread_id": self.session_id}}
+
+        # Get current state
+        try:
+            state = await graph.aget_state(config)
+        except Exception as e:
+            raise WorkflowCheckpointError(
+                f"Failed to retrieve checkpoint: {e}",
+                details={"session_id": self.session_id},
+            ) from e
+
+        if not state or not state.values:
+            raise WorkflowCheckpointError(
+                f"No checkpoint found for session {self.session_id}",
+                details={"session_id": self.session_id},
+            )
+
+        current_state = dict(state.values)
+
+        # If user input provided, update state
+        if user_input:
+            current_state["user_input"] = user_input
+            current_state["requires_user_input"] = False
+
+        # Stream the resumed workflow
+        try:
+            async for state in graph.astream(current_state, config, stream_mode="values"):
+                if state and isinstance(state, dict):
+                    yield state
+        except Exception as e:
+            logger.error(f"Failed to stream resumed workflow: {e}")
+            # Yield an error state so consumers know what happened
+            yield {
+                "phase": WorkflowPhase.ERROR.value,
+                "error_message": str(e),
+                "errors": [{"error_type": type(e).__name__, "message": str(e)}],
+            }
+            raise WorkflowError(
+                f"Failed to stream resumed workflow: {e}",
+                details={"session_id": self.session_id},
+            ) from e
 
     async def get_state(self) -> Optional[dict[str, Any]]:
         """

@@ -107,6 +107,7 @@ class BaseAgent(ABC):
         llm: Optional[BaseChatModel] = None,
         provider: Optional[LLMProvider] = None,
         model: Optional[str] = None,
+        api_key: Optional[str] = None,
         retry_config: Optional[RetryConfig] = None,
     ):
         """
@@ -116,50 +117,78 @@ class BaseAgent(ABC):
             llm: Pre-configured LLM instance (optional)
             provider: LLM provider to use (defaults to settings)
             model: Model name to use (defaults to settings)
+            api_key: API key for the LLM provider (overrides env vars)
             retry_config: Configuration for retry behavior
         """
-        self.llm = llm or self._create_llm(provider, model)
+        self.llm = llm or self._create_llm(provider, model, api_key)
         self.retry_config = retry_config or DEFAULT_RETRY_CONFIG
 
     def _create_llm(
         self,
         provider: Optional[LLMProvider] = None,
         model: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> BaseChatModel:
         """Create an LLM instance based on configuration."""
         provider = provider or settings.default_llm_provider
         model = model or settings.default_model
 
         if provider == LLMProvider.ANTHROPIC:
-            api_key = settings.get_api_key(LLMProvider.ANTHROPIC)
-            if not api_key:
-                raise ValueError("ANTHROPIC_API_KEY not configured")
+            key = api_key or settings.get_api_key(LLMProvider.ANTHROPIC)
+            if not key:
+                raise LLMConfigurationError(
+                    "ANTHROPIC_API_KEY not configured",
+                    details={"provider": provider.value},
+                )
             return ChatAnthropic(
                 model=model,
-                api_key=api_key,
+                api_key=key,
                 max_tokens=4096,
             )
 
         elif provider == LLMProvider.OPENAI:
-            api_key = settings.get_api_key(LLMProvider.OPENAI)
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY not configured")
+            key = api_key or settings.get_api_key(LLMProvider.OPENAI)
+            if not key:
+                raise LLMConfigurationError(
+                    "OPENAI_API_KEY not configured",
+                    details={"provider": provider.value},
+                )
             return ChatOpenAI(
                 model=model or "gpt-4o",
-                api_key=api_key,
+                api_key=key,
             )
 
         elif provider == LLMProvider.GOOGLE:
-            api_key = settings.get_api_key(LLMProvider.GOOGLE)
-            if not api_key:
-                raise ValueError("GOOGLE_API_KEY not configured")
+            key = api_key or settings.get_api_key(LLMProvider.GOOGLE)
+            if not key:
+                raise LLMConfigurationError(
+                    "GOOGLE_API_KEY not configured",
+                    details={"provider": provider.value},
+                )
             return ChatGoogleGenerativeAI(
                 model=model or "gemini-2.0-flash",
-                google_api_key=api_key,
+                google_api_key=key,
+            )
+
+        elif provider == LLMProvider.GROQ:
+            key = api_key or settings.get_api_key(LLMProvider.GROQ)
+            if not key:
+                raise LLMConfigurationError(
+                    "GROQ_API_KEY not configured",
+                    details={"provider": provider.value},
+                )
+            # Groq uses OpenAI-compatible API
+            from langchain_groq import ChatGroq
+            return ChatGroq(
+                model=model or "llama-3.3-70b-versatile",
+                api_key=key,
             )
 
         else:
-            raise ValueError(f"Unsupported provider: {provider}")
+            raise LLMConfigurationError(
+                f"Unsupported provider: {provider}",
+                details={"provider": str(provider)},
+            )
 
     @property
     @abstractmethod
@@ -322,6 +351,36 @@ class BaseAgent(ABC):
             f"LLM error: {error}",
             details={"original_error": str(error)},
         )
+
+    @classmethod
+    def from_state(cls, state: dict) -> "BaseAgent":
+        """
+        Create an agent instance with LLM configuration from state.
+
+        Args:
+            state: The workflow state containing LLM configuration
+
+        Returns:
+            An agent instance configured with the state's LLM settings
+        """
+        provider = None
+        model = None
+        api_key = None
+
+        # Extract LLM config from state if present
+        if state.get("llm_provider"):
+            try:
+                provider = LLMProvider(state["llm_provider"])
+            except ValueError:
+                logger.warning(f"Invalid LLM provider in state: {state['llm_provider']}")
+
+        if state.get("llm_model"):
+            model = state["llm_model"]
+
+        if state.get("llm_api_key"):
+            api_key = state["llm_api_key"]
+
+        return cls(provider=provider, model=model, api_key=api_key)
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(name={self.name}, role={self.role})>"

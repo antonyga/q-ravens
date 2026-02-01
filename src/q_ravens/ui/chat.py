@@ -14,6 +14,7 @@ from uuid import uuid4
 from q_ravens.core.runner import QRavensRunner
 from q_ravens.core.state import WorkflowPhase
 from q_ravens.core.asyncio_compat import run_in_thread
+from q_ravens.core.config import LLMProvider, settings
 
 
 # Page configuration
@@ -43,6 +44,9 @@ def init_session_state() -> None:
         st.session_state.requires_input = False
     if "input_prompt" not in st.session_state:
         st.session_state.input_prompt = ""
+    # LLM configuration - persisted in session
+    if "llm_api_key" not in st.session_state:
+        st.session_state.llm_api_key = ""
 
 
 def render_sidebar() -> dict[str, Any]:
@@ -80,6 +84,83 @@ def render_sidebar() -> dict[str, Any]:
             default=["Smoke Tests", "Functional Tests"],
             help="Select the types of tests to run",
         )
+
+        st.divider()
+
+        # LLM Configuration
+        st.subheader("LLM Configuration")
+
+        # Provider selection
+        provider_options = {
+            "Anthropic (Claude)": LLMProvider.ANTHROPIC,
+            "OpenAI (GPT)": LLMProvider.OPENAI,
+            "Google (Gemini)": LLMProvider.GOOGLE,
+            "Groq": LLMProvider.GROQ,
+            "Ollama (Local)": LLMProvider.OLLAMA,
+        }
+
+        # Get default from settings
+        default_provider_name = next(
+            (name for name, p in provider_options.items()
+             if p == settings.default_llm_provider),
+            "Anthropic (Claude)"
+        )
+
+        selected_provider_name = st.selectbox(
+            "LLM Provider",
+            options=list(provider_options.keys()),
+            index=list(provider_options.keys()).index(default_provider_name),
+            help="Select the LLM provider for the AI agents",
+        )
+        selected_provider = provider_options[selected_provider_name]
+
+        # Model selection based on provider
+        model_defaults = {
+            LLMProvider.ANTHROPIC: "claude-sonnet-4-20250514",
+            LLMProvider.OPENAI: "gpt-4o",
+            LLMProvider.GOOGLE: "gemini-2.0-flash",
+            LLMProvider.GROQ: "llama-3.3-70b-versatile",
+            LLMProvider.OLLAMA: "llama3",
+        }
+
+        selected_model = st.text_input(
+            "Model Name",
+            value=model_defaults.get(selected_provider, ""),
+            help="The specific model to use (e.g., claude-sonnet-4-20250514, gpt-4o)",
+        )
+
+        # API Key input (not needed for Ollama)
+        ollama_url = None  # Initialize for non-Ollama providers
+
+        if selected_provider != LLMProvider.OLLAMA:
+            # Check if we have a key in environment
+            env_key = settings.get_api_key(selected_provider)
+            has_env_key = bool(env_key)
+
+            if has_env_key:
+                st.success("API key loaded from environment", icon="✅")
+                api_key = env_key
+            else:
+                api_key = st.text_input(
+                    "API Key",
+                    type="password",
+                    value=st.session_state.llm_api_key,
+                    help=f"Enter your {selected_provider_name} API key",
+                    placeholder="sk-... or similar",
+                )
+                # Store in session state to persist across reruns
+                if api_key:
+                    st.session_state.llm_api_key = api_key
+
+                if not api_key:
+                    st.warning("API key required", icon="⚠️")
+        else:
+            api_key = None
+            ollama_url = st.text_input(
+                "Ollama URL",
+                value=settings.ollama_base_url,
+                help="URL of your local Ollama instance",
+            )
 
         st.divider()
 
@@ -132,6 +213,10 @@ def render_sidebar() -> dict[str, Any]:
             "max_iterations": max_iterations,
             "persist_state": persist_state,
             "human_approval": human_approval,
+            "llm_provider": selected_provider,
+            "llm_model": selected_model,
+            "llm_api_key": api_key,
+            "ollama_url": ollama_url if selected_provider == LLMProvider.OLLAMA else None,
         }
 
 
@@ -320,6 +405,20 @@ def render_test_results(test_results: list[dict]) -> None:
                 st.code(result.get("actual_result"))
 
 
+def _create_empty_result() -> dict[str, Any]:
+    """Create an empty result dictionary for workflow operations."""
+    return {
+        "success": False,
+        "workflow_state": None,
+        "test_results": None,
+        "report": None,
+        "error": None,
+        "requires_input": False,
+        "input_prompt": "",
+        "messages": [],
+    }
+
+
 def render_report(report: Any) -> None:
     """
     Render the final test report.
@@ -403,6 +502,9 @@ async def run_workflow_async(
     user_request: str,
     session_id: str,
     persist_state: bool = True,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Run the Q-Ravens workflow asynchronously.
@@ -415,24 +517,21 @@ async def run_workflow_async(
         user_request: Natural language test request
         session_id: Session ID for the workflow
         persist_state: Whether to persist state to disk
+        llm_provider: LLM provider to use
+        llm_model: Model name to use
+        llm_api_key: API key for the provider
 
     Returns:
         Dictionary with workflow results
     """
-    result = {
-        "success": False,
-        "workflow_state": None,
-        "test_results": None,
-        "report": None,
-        "error": None,
-        "requires_input": False,
-        "input_prompt": "",
-        "messages": [],
-    }
+    result = _create_empty_result()
 
     runner = QRavensRunner(
         persist=persist_state,
         session_id=session_id,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        llm_api_key=llm_api_key,
     )
 
     result["messages"].append({
@@ -504,6 +603,108 @@ async def run_workflow_async(
     return result
 
 
+async def resume_workflow_async(
+    session_id: str,
+    user_input: str,
+    persist_state: bool = True,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Resume a paused Q-Ravens workflow with user input.
+
+    Args:
+        session_id: Session ID for the workflow
+        user_input: User's response to the approval prompt
+        persist_state: Whether to persist state to disk
+        llm_provider: LLM provider to use
+        llm_model: Model name to use
+        llm_api_key: API key for the provider
+
+    Returns:
+        Dictionary with workflow results
+    """
+    result = _create_empty_result()
+
+    runner = QRavensRunner(
+        persist=persist_state,
+        session_id=session_id,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        llm_api_key=llm_api_key,
+    )
+
+    result["messages"].append({
+        "role": "assistant",
+        "content": f"Resuming workflow with your response: **{user_input}**",
+        "type": "status",
+    })
+
+    try:
+        # Resume the workflow with user input
+        async for state in runner.stream_resume(user_input):
+            result["workflow_state"] = state
+
+            phase = state.get("phase", "unknown")
+            current_agent = state.get("current_agent", "processing")
+
+            # Add status message
+            result["messages"].append({
+                "role": "assistant",
+                "content": f"**{current_agent.title()}** is now active (Phase: {phase})",
+                "type": "status",
+            })
+
+            # Check for human-in-the-loop again
+            if state.get("requires_user_input"):
+                result["requires_input"] = True
+                result["input_prompt"] = state.get(
+                    "user_input_prompt", "Please provide input:"
+                )
+                break
+
+            # Store test results
+            if state.get("test_results"):
+                result["test_results"] = state.get("test_results")
+
+            # Store report
+            if state.get("report"):
+                result["report"] = state.get("report")
+
+            # Check for completion
+            if phase == WorkflowPhase.COMPLETED.value:
+                result["success"] = True
+                result["messages"].append({
+                    "role": "assistant",
+                    "content": "Workflow completed successfully!",
+                    "type": "success",
+                })
+                break
+
+            # Check for errors
+            if phase == WorkflowPhase.ERROR.value:
+                errors = state.get("errors", [])
+                error_msg = errors[-1] if errors else "Unknown error occurred"
+                result["error"] = error_msg
+                result["messages"].append({
+                    "role": "assistant",
+                    "content": f"Error: {error_msg}",
+                    "type": "error",
+                })
+                break
+
+    except Exception as e:
+        result["error"] = str(e)
+        result["messages"].append({
+            "role": "assistant",
+            "content": f"Workflow resume failed: {str(e)}",
+            "type": "error",
+        })
+
+    return result
+
+
 def run_workflow(url: str, user_request: str, config: dict[str, Any]) -> None:
     """
     Run the workflow and update Streamlit session state with results.
@@ -521,10 +722,24 @@ def run_workflow(url: str, user_request: str, config: dict[str, Any]) -> None:
     session_id = st.session_state.session_id
     persist_state = config.get("persist_state", True)
 
+    # Extract LLM configuration
+    llm_provider = config.get("llm_provider")
+    llm_provider_str = llm_provider.value if llm_provider else None
+    llm_model = config.get("llm_model")
+    llm_api_key = config.get("llm_api_key")
+
     try:
         # Run the workflow in a separate thread with proper event loop
         result = run_in_thread(
-            run_workflow_async(url, user_request, session_id, persist_state)
+            run_workflow_async(
+                url,
+                user_request,
+                session_id,
+                persist_state,
+                llm_provider_str,
+                llm_model,
+                llm_api_key,
+            )
         )
 
         # Update session state with results (back in main thread)
@@ -559,6 +774,76 @@ def run_workflow(url: str, user_request: str, config: dict[str, Any]) -> None:
         st.session_state.messages.append({
             "role": "assistant",
             "content": f"Workflow execution failed: {str(e)}",
+            "type": "error",
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    finally:
+        st.session_state.is_running = False
+
+
+def resume_workflow(user_input: str, config: dict[str, Any]) -> None:
+    """
+    Resume a paused workflow with user input and update Streamlit session state.
+
+    Args:
+        user_input: User's response to the approval prompt
+        config: Configuration options
+    """
+    session_id = st.session_state.session_id
+    persist_state = config.get("persist_state", True)
+
+    # Extract LLM configuration
+    llm_provider = config.get("llm_provider")
+    llm_provider_str = llm_provider.value if llm_provider else None
+    llm_model = config.get("llm_model")
+    llm_api_key = config.get("llm_api_key")
+
+    try:
+        # Resume the workflow in a separate thread with proper event loop
+        result = run_in_thread(
+            resume_workflow_async(
+                session_id,
+                user_input,
+                persist_state,
+                llm_provider_str,
+                llm_model,
+                llm_api_key,
+            )
+        )
+
+        # Update session state with results (back in main thread)
+        if result:
+            # Add all messages from the workflow
+            for msg in result.get("messages", []):
+                st.session_state.messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "type": msg["type"],
+                    "timestamp": datetime.now().isoformat(),
+                })
+
+            # Update workflow state
+            if result.get("workflow_state"):
+                st.session_state.workflow_state = result["workflow_state"]
+
+            # Update test results
+            if result.get("test_results"):
+                st.session_state.test_results = result["test_results"]
+
+            # Update report
+            if result.get("report"):
+                st.session_state.report = result["report"]
+
+            # Handle human-in-the-loop (if more approval needed)
+            if result.get("requires_input"):
+                st.session_state.requires_input = True
+                st.session_state.input_prompt = result["input_prompt"]
+
+    except Exception as e:
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": f"Workflow resume failed: {str(e)}",
             "type": "error",
             "timestamp": datetime.now().isoformat(),
         })
@@ -606,8 +891,9 @@ def main() -> None:
                 if user_input:
                     add_message("user", user_input)
                     st.session_state.requires_input = False
-                    # Resume workflow with input
-                    # TODO: Implement resume with user input
+                    st.session_state.is_running = True
+                    # Resume workflow with user input
+                    resume_workflow(user_input, config)
                     st.rerun()
 
         # Chat input

@@ -462,5 +462,5 @@ Respond with ONLY a JSON array of test cases, no additional text."""
 # Create node function for LangGraph
 async def designer_node(state: QRavensState) -> dict[str, Any]:
     """LangGraph node function for the Designer agent."""
-    agent = DesignerAgent()
+    agent = DesignerAgent.from_state(state)
     return await agent.process(state)

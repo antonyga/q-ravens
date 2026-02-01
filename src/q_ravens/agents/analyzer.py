@@ -130,5 +130,5 @@ Provide structured, actionable insights that will help design comprehensive test
 # Create node function for LangGraph
 async def analyzer_node(state: QRavensState) -> dict[str, Any]:
     """LangGraph node function for the Analyzer agent."""
-    agent = AnalyzerAgent()
+    agent = AnalyzerAgent.from_state(state)
     return await agent.process(state)

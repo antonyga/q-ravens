@@ -256,5 +256,5 @@ Do you approve executing these tests? (yes/no)"""
 # Create node function for LangGraph
 async def orchestrator_node(state: QRavensState) -> dict[str, Any]:
     """LangGraph node function for the Orchestrator agent."""
-    agent = OrchestratorAgent()
+    agent = OrchestratorAgent.from_state(state)
     return await agent.process(state)

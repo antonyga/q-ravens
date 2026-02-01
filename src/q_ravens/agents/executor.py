@@ -512,5 +512,5 @@ When executing tests:
 # Create node function for LangGraph
 async def executor_node(state: QRavensState) -> dict[str, Any]:
     """LangGraph node function for the Executor agent."""
-    agent = ExecutorAgent()
+    agent = ExecutorAgent.from_state(state)
     return await agent.process(state)

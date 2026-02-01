@@ -649,5 +649,5 @@ The following issues should be reviewed:
 # Create node function for LangGraph
 async def reporter_node(state: QRavensState) -> dict[str, Any]:
     """LangGraph node function for the Reporter agent."""
-    agent = ReporterAgent()
+    agent = ReporterAgent.from_state(state)
     return await agent.process(state)

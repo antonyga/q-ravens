@@ -180,3 +180,8 @@ class QRavensState(TypedDict, total=False):
     # Metadata
     session_id: str
     started_at: str
+
+    # LLM Configuration (passed from UI)
+    llm_provider: str  # LLMProvider value
+    llm_model: str
+    llm_api_key: str

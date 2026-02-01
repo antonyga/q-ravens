@@ -1,0 +1,203 @@
+{
+    "title": "Recording 1/2/2026 at 10:09:08",
+    "steps": [
+        {
+            "type": "setViewport",
+            "width": 1437,
+            "height": 959,
+            "deviceScaleFactor": 1,
+            "isMobile": false,
+            "hasTouch": false,
+            "isLandscape": false
+        },
+        {
+            "type": "navigate",
+            "url": "http://localhost:8501/",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8501/",
+                    "title": "Q-Ravens QA Agent"
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Target URL"
+                ],
+                [
+                    "#text_input_1"
+                ],
+                [
+                    "xpath///*[@id=\"text_input_1\"]"
+                ],
+                [
+                    "pierce/#text_input_1"
+                ]
+            ],
+            "offsetY": 13.21875,
+            "offsetX": 306
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Target URL"
+                ],
+                [
+                    "#text_input_1"
+                ],
+                [
+                    "xpath///*[@id=\"text_input_1\"]"
+                ],
+                [
+                    "pierce/#text_input_1"
+                ]
+            ],
+            "offsetY": 17.21875,
+            "offsetX": 179
+        },
+        {
+            "type": "change",
+            "value": "https://carlitos.com/",
+            "selectors": [
+                [
+                    "aria/Target URL"
+                ],
+                [
+                    "#text_input_1"
+                ],
+                [
+                    "xpath///*[@id=\"text_input_1\"]"
+                ],
+                [
+                    "pierce/#text_input_1"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Describe what you want to test..."
+                ],
+                [
+                    "[data-testid='stChatInputTextArea']"
+                ],
+                [
+                    "xpath///*[@data-testid=\"stChatInputTextArea\"]"
+                ],
+                [
+                    "pierce/[data-testid='stChatInputTextArea']"
+                ]
+            ],
+            "offsetY": 16.015625,
+            "offsetX": 105
+        },
+        {
+            "type": "change",
+            "value": "test if the 'Lunazul Reposado' drink is on the Menu page",
+            "selectors": [
+                [
+                    "aria/Describe what you want to test..."
+                ],
+                [
+                    "[data-testid='stChatInputTextArea']"
+                ],
+                [
+                    "xpath///*[@data-testid=\"stChatInputTextArea\"]"
+                ],
+                [
+                    "pierce/[data-testid='stChatInputTextArea']"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "[data-testid='stTabs'] svg"
+                ],
+                [
+                    "xpath///*[@data-testid=\"stChatInputSubmitButton\"]/svg"
+                ],
+                [
+                    "pierce/[data-testid='stTabs'] svg"
+                ]
+            ],
+            "offsetY": 8.8125,
+            "offsetX": 18
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Your response:"
+                ],
+                [
+                    "#text_input_2"
+                ],
+                [
+                    "xpath///*[@id=\"text_input_2\"]"
+                ],
+                [
+                    "pierce/#text_input_2"
+                ]
+            ],
+            "offsetY": 31.671875,
+            "offsetX": 144
+        },
+        {
+            "type": "change",
+            "value": "yes",
+            "selectors": [
+                [
+                    "aria/Your response:"
+                ],
+                [
+                    "#text_input_2"
+                ],
+                [
+                    "xpath///*[@id=\"text_input_2\"]"
+                ],
+                [
+                    "pierce/#text_input_2"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Submit Response",
+                    "aria/[role=\"paragraph\"]"
+                ],
+                [
+                    "html > body > #root > div:nth-of-type(1) > [data-testid='stScreencast'] > [data-testid='stApp'] > [data-testid='stAppViewContainer'] > div > [data-testid='stMain'] > [data-testid='stMainBlockContainer'] > [data-testid='stVerticalBlock'] > [data-testid='stTabs'] > div > #tabs-bui10-tabpanel-0 > [data-testid='stVerticalBlock'] > [data-testid='stElementContainer'] p"
+                ],
+                [
+                    "xpath///*[@data-testid=\"stMarkdownContainer\"]/p"
+                ],
+                [
+                    "pierce/html > body > #root > div:nth-of-type(1) > [data-testid='stScreencast'] > [data-testid='stApp'] > [data-testid='stAppViewContainer'] > div > [data-testid='stMain'] > [data-testid='stMainBlockContainer'] > [data-testid='stVerticalBlock'] > [data-testid='stTabs'] > div > #tabs-bui10-tabpanel-0 > [data-testid='stVerticalBlock'] > [data-testid='stElementContainer'] p"
+                ],
+                [
+                    "text/Submit Response"
+                ]
+            ],
+            "offsetY": 9.46875,
+            "offsetX": 74
+        }
+    ]
+}
